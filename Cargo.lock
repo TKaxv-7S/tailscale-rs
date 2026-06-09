@@ -5828,10 +5828,12 @@ dependencies = [
 name = "ts_dataplane"
 version = "0.3.3"
 dependencies = [
+ "bytes",
  "etherparse",
  "tokio",
  "tracing",
  "ts_bart",
+ "ts_disco_protocol",
  "ts_overlay_router",
  "ts_packet",
  "ts_packetfilter",
