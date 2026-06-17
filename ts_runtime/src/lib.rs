@@ -37,6 +37,62 @@ pub use error::{Error, ErrorKind};
 
 use crate::peer_tracker::PeerTracker;
 
+/// Wait for all of the listed [`ActorRef`]s to start, ensuring they haven't failed.
+///
+/// TODO(npry): we only do this this way because we don't currently have a supervision tree and any
+/// of these actors failing to start means that the runtime is permanently compromised. In the
+/// future, it should not be a fatal error to start up the runtime if your underlay network is
+/// offline, where it currently is because e.g. control will fail its on_start if it can't connect,
+/// so it will just be dead forever, making your runtime unusable.
+///
+/// So long as we're lacking the supervision functionality, it's better to fail early/fast like this
+/// and have it take down the whole runtime before it starts rather than living with a
+/// silently-degraded one; the actors being dead would only be surfaced later when something tried
+/// to talk to them.
+macro_rules! try_join_startup {
+    ($([$($optaref:ident)*] $(,)?)? $($aref:ident),* $(,)?) => {
+        {
+            tokio::try_join![
+                $(
+                    $(
+                        match $optaref.as_ref() {
+                            Some(aref) => {
+                                Box::pin(map_startup_result(aref)) as core::pin::Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>
+                            },
+                            None => {
+                                Box::pin(core::future::ready(Ok(()))) as core::pin::Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>
+                            }
+                        },
+                    )*
+                )?
+                $(
+                    map_startup_result(&$aref),
+                )*
+            ]
+        }
+    }
+}
+
+async fn map_startup_result<A>(aref: &ActorRef<A>) -> Result<(), Error>
+where
+    A: kameo::Actor,
+    A::Error: core::error::Error,
+{
+    aref.wait_for_startup_with_result(|r| {
+        r.map_err(|e| {
+            // TODO(npry): due to https://github.com/tqwewe/kameo/pull/340, we _must not_ access
+            // `e`'s internals (via Debug, Display, or a field access) in this closure scope if it's
+            // a panic error or it will deadlock this thread. `Error::from` upholds this invariant
+            // (and drops the error, so it won't cause the issue later on), but we don't want to
+            // print it as part of this trace for now.
+            tracing::error!(actor = ?aref, "startup for actor failed");
+
+            Error::from(e).with_actor_info(aref.clone())
+        })
+    })
+    .await
+}
+
 /// The runtime for a tailscale device.
 pub struct Runtime {
     /// Reference to the control actor.
@@ -66,16 +122,16 @@ impl Runtime {
 
         let multiderp = Multiderp::spawn((env.clone(), dataplane.clone()));
 
-        route_updater::RouteUpdater::spawn((multiderp.clone(), env.clone(), netstack_id));
-        packetfilter::PacketfilterUpdater::spawn(env.clone());
-        src_filter::SourceFilterUpdater::spawn(env.clone());
-        stunner::Stunner::spawn(env.clone());
+        let rt_upd =
+            route_updater::RouteUpdater::spawn((multiderp.clone(), env.clone(), netstack_id));
+        let pf_upd = packetfilter::PacketfilterUpdater::spawn(env.clone());
+        let src_upd = src_filter::SourceFilterUpdater::spawn(env.clone());
+        let stunner = stunner::Stunner::spawn(env.clone());
 
-        if let Some(mon) = ts_netmon::platform_mon() {
-            netmon::NetmonActor::spawn((env.clone(), Arc::new(mon)));
-        }
+        let netmon = ts_netmon::platform_mon()
+            .map(|mon| netmon::NetmonActor::spawn((env.clone(), Arc::new(mon))));
 
-        let peer_tracker = PeerTracker::spawn(env.clone()).downgrade();
+        let peer_tracker = PeerTracker::spawn(env.clone());
 
         let netstack =
             NetstackActor::spawn((env.clone(), Default::default(), netstack_up, netstack_down));
@@ -86,14 +142,32 @@ impl Runtime {
             env: env.clone(),
         });
 
-        Ok(Self {
-            control,
-            dataplane,
-            peer_tracker,
+        // Construct the Runtime _before_ awaiting all actor startups so we get the cleanup in its
+        // Drop for free.
+        let rt = Self {
+            control: control.clone(),
+            dataplane: dataplane.clone(),
+            peer_tracker: peer_tracker.downgrade(),
             netstack: netstack.downgrade(),
             env,
             shutdown: shutdown_tx,
-        })
+        };
+
+        tracing::trace!("waiting for actors to finish starting");
+        try_join_startup![
+            [netmon],
+            dataplane,
+            rt_upd,
+            pf_upd,
+            src_upd,
+            stunner,
+            peer_tracker,
+            netstack,
+            control,
+        ]?;
+        tracing::trace!("all root actors started ok");
+
+        Ok(rt)
     }
 
     /// Get a channel to send commands to the netstack.

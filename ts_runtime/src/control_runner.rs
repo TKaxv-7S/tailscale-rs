@@ -39,7 +39,7 @@ pub struct Params {
 }
 
 #[doc(hidden)]
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum ControlRunnerError {
     #[error(transparent)]
     Control(#[from] ControlError),

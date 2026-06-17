@@ -21,6 +21,7 @@ pub struct Stunner {
 }
 
 impl Stunner {
+    #[tracing::instrument(skip_all, fields(n_server = self.servers.len()), level = "trace")]
     async fn try_stun(&self) {
         for &server in &self.servers {
             if let Ok(Ok((_dur, x))) =

@@ -3,7 +3,7 @@ use core::fmt::{Formatter, Write};
 use kameo::{
     Actor,
     actor::{ActorRef, WeakActorRef},
-    error::SendError,
+    error::{HookError, SendError},
 };
 
 pub(crate) trait ResultExt {
@@ -87,6 +87,26 @@ impl<M, E> From<SendError<M, E>> for Error {
             kind: err.into(),
             message_ty: Some(core::any::type_name::<M>()),
             target_actor: None,
+        }
+    }
+}
+
+impl<E> From<HookError<E>> for Error {
+    fn from(value: HookError<E>) -> Self {
+        // TODO(npry): due to https://github.com/tqwewe/kameo/pull/340, we _must not_ access `e`'s
+        // internals if it's a panic error and this function may be called via with_startup_result
+        // or any of the other `ActorRef::*_with_*` callback functions.
+        match value {
+            HookError::Error(_) => Self {
+                kind: ErrorKind::ReplyErr,
+                target_actor: None,
+                message_ty: Some("ActorStartOrStop"),
+            },
+            HookError::Panicked(_) => Self {
+                kind: ErrorKind::ActorGone,
+                target_actor: None,
+                message_ty: Some("ActorStartOrStop"),
+            },
         }
     }
 }
