@@ -78,7 +78,9 @@ impl kameo::Actor for ControlRunner {
         .await?;
 
         params.env.subscribe::<DerpLatencyMeasurement>(&slf).await?;
-        DerpLatencyMeasurer::spawn_link(&slf, params.env.clone()).await;
+        DerpLatencyMeasurer::supervise(&slf, params.env.clone())
+            .spawn()
+            .await;
 
         slf.attach_stream(stream.boxed(), (), ());
 
