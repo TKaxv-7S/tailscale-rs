@@ -246,12 +246,13 @@ impl<'store, TableStorage: schema::GeneratedStorage> operations::OpsMut<TableSto
 pub type Owner = &'static str;
 
 /// An error from a [`KvStore`].
-// TODO derive(Error)
-#[derive(Debug, Clone)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
     /// A table was expected to not be initialized, but was by the specified `Owner`.
+    #[error("A table has already been initialized with owner `{0}`")]
     AlreadyInit(Owner),
     /// An inconsistency caused a transaction to fail. It has not been committed and can be re-tried.
+    #[error("Transaction Failed")]
     TransactionFailed,
 }
 
