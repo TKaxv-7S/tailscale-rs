@@ -688,7 +688,7 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
         }
     }
 
-    pub(crate) fn get<Q>(&self, key: &Q, txn_id: TxnId) -> Option<&D::Value>
+    pub fn get<Q>(&self, key: &Q, txn_id: TxnId) -> Option<&D::Value>
     where
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -748,7 +748,6 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
         D::Value: Clone,
     {
         // TODO could be more efficient by only updating if value is changed
-
         match &mut self.delete_mask {
             DeleteMask::None => Self::iter_data_mut(&mut self.data, txn_id).for_each(|(k, v)| {
                 self.indexes.on_remove(v, txn_id, max_committed_id);

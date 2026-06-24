@@ -506,7 +506,9 @@ macro_rules! tables {
                 {
                     $({
                         for value in index::$name::Indexes::$field(_value) {
+                            let unique = self.$field.get(&value, _txn_id).is_none();
                             self.$field.insert(value, _key.to_owned(), _txn_id, _max_committed_id);
+                            debug_assert!(unique, "Index key is non-unique for index `{}` of table `{}`", stringify!($name), stringify!($field));
                         }
                     })*
                 }
