@@ -72,9 +72,11 @@ pub trait TableDesc: Sized + 'static {
     type Value: Any + Send + Sync;
     /// The storage for the table.
     type Storage: GeneratedStorage;
-    /// The storage type for keeping this tables indexes.
+    /// The storage type for keeping this table's indexes.
     type Indexes: IndexStorage<Self::Key, Self::Value>;
 
+    /// Return the name of the table.
+    fn name() -> &'static str;
     /// Get a reference to the table in storage.
     fn get_table(storage: &Self::Storage) -> &Table<Self, Self::Indexes>;
     /// Get a mutable reference to the table in storage.
@@ -338,17 +340,6 @@ macro_rules! match_helper_rhs_mut {
     };
 }
 
-#[doc(hidden)]
-#[macro_export]
-macro_rules! _get_index {
-    ($value_ty:ty, $field:ident, $field_ty:ty) => {
-        |value: &$value_ty| Some(value.$field.clone())
-    };
-    ($value_ty:ty, $field:ident, $field_ty:ty, $get_idx:expr) => {
-        $get_idx
-    };
-}
-
 /// Declare the tables in a key/value store. Generates the store itself with the specified tables.
 ///
 /// The syntax is `tables!(Name(KeyType, ValueType indexes?),*)`, where `Name` is an identifier to name
@@ -377,7 +368,12 @@ macro_rules! _get_index {
 /// # use ts_kv_store::tables;
 /// # pub struct Node { a: u32, b: String };
 /// tables!(
-///   Nodes(&'static str => Node; index(a: u32); index(b: String); index(c: String = |node: &Node| Some(format!("{}-{}", node.a, node.b))))
+///   Nodes(
+///     &'static str => Node;
+///     index(a: u32);
+///     index(b: String; assert_unique);
+///     index(c: String = |node: &Node| Some(format!("{}-{}", node.a, node.b)));
+///   )
 /// );
 /// ```
 ///
@@ -388,13 +384,13 @@ macro_rules! _get_index {
 /// an optional field or an index key can't be produced.
 ///
 /// Index fields must uniquely identify a row in the base table. If multiple rows in the base table
-/// have the same key in the index, then behavior is unspecified (might give partial or incorrect
-/// result, might panic, etc.). The type of the primary key of the data must be `Clone` (since it
-/// will be cloned when inserted into the index), and the index type must be `Clone` as well if a
-/// closure isn't specified (the behavior in this case is `|value| Some(value.$field.clone)`).
+/// have the same key in the index, then by default the index will be 'poisoned' and accessing the
+/// index or trying to commit a transaction where an index is poisoned will return an error (`NonUniqueIndexKey`).
+/// By adding `assert_unique` to an index declaration (after the index field, separated with a semicolon),
+/// attempting to store multiple rows with the same index key will cause a panic.
 #[macro_export]
 macro_rules! tables {
-    ($($name: ident ($key_ty: ty => $value_ty: ty $(; index($field: ident: $field_ty: ty $(= $get_idx:expr)?))* $(;)?)),*) => {
+    ($($name: ident ($key_ty: ty => $value_ty: ty $(; index($field: ident: $field_ty: ty $(= $get_idx: expr)? $(; $unique:ident)?))* $(;)?)),*) => {
         $(
             /// Describes a table in the KV store.
             #[derive(Default)]
@@ -406,6 +402,9 @@ macro_rules! tables {
                 type Storage = TableStorage;
                 type Indexes = index::$name::Indexes;
 
+                fn name() -> &'static str {
+                    stringify!($name)
+                }
                 fn get_table(storage: &TableStorage) -> &$crate::storage::Table<Self, Self::Indexes> {
                     &storage.$name
                 }
@@ -421,6 +420,9 @@ macro_rules! tables {
                     type Storage = TableStorage;
                     type Indexes = ();
 
+                    fn name() -> &'static str {
+                        stringify!($name by $field)
+                    }
                     fn get_table(storage: &TableStorage) -> &$crate::storage::Table<Self, Self::Indexes> {
                         &storage.$name.indexes.$field
                     }
@@ -487,7 +489,7 @@ macro_rules! tables {
             impl index::$name::Indexes {
                 $(
                     fn $field(val: &$value_ty) -> impl IntoIterator<Item = $field_ty> {
-                        ($crate::_get_index!($value_ty, $field, $field_ty $(, $get_idx)?))(val)
+                        ($crate::get_index_expr!($value_ty, $field, $field_ty $(, $get_idx)?))(val)
                     }
                 )*
             }
@@ -499,19 +501,7 @@ macro_rules! tables {
                     )*
                 }
 
-                fn on_insert<Q>(&mut self, _key: &Q, _value: &$value_ty, _txn_id: $crate::transactions::TxnId, _max_committed_id: $crate::transactions::TxnId)
-                where
-                    $key_ty: std::borrow::Borrow<Q>,
-                    Q: ?Sized + std::hash::Hash + Eq + std::borrow::ToOwned<Owned = $key_ty>
-                {
-                    $({
-                        for value in index::$name::Indexes::$field(_value) {
-                            let unique = self.$field.get(&value, _txn_id).is_none();
-                            self.$field.insert(value, _key.to_owned(), _txn_id, _max_committed_id);
-                            debug_assert!(unique, "Index key is non-unique for index `{}` of table `{}`", stringify!($name), stringify!($field));
-                        }
-                    })*
-                }
+                $crate::on_insert!($name, $key_ty, $value_ty, $(index($field: $field_ty $(; $unique)?),)*);
 
                 fn on_remove(&mut self, _value: &$value_ty, _txn_id: $crate::transactions::TxnId, _max_committed_id: $crate::transactions::TxnId) {
                     $({
@@ -540,6 +530,74 @@ macro_rules! tables {
 
             fn deref(&self) -> &Self::Target {
                 &self.0
+            }
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! get_index_expr {
+    ($value_ty:ty, $field:ident, $field_ty:ty) => {
+        |value: &$value_ty| Some(value.$field.clone())
+    };
+    ($value_ty:ty, $field:ident, $field_ty:ty, $get_idx:expr) => {
+        $get_idx
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! on_insert {
+    ($name: ident, $key_ty: ty, $value_ty: ty, $(index($field: ident: $field_ty: ty $(; $unique:ident)?),)*) => {
+        fn on_insert<Q>(&mut self, _key: &Q, _value: &$value_ty, _txn_id: $crate::transactions::TxnId, _max_committed_id: $crate::transactions::TxnId)
+        where
+            $key_ty: std::borrow::Borrow<Q>,
+            Q: ?Sized + std::hash::Hash + Eq + std::borrow::ToOwned<Owned = $key_ty>
+        {
+            $(
+                $crate::on_insert_each!($name, $field: $field_ty; (self, _key, _value, _txn_id, _max_committed_id) $(; $unique)?);
+            )*
+        }
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! on_insert_each {
+    (
+        $name:ident,
+        $field:ident :
+        $field_ty:ty;
+        ($self:ident, $key:ident, $value:ident, $txn_id:ident, $max_committed_id:ident); assert_unique
+    ) => {
+        for value in index::$name::Indexes::$field($value) {
+            let unique = $self.$field.get(&value, $txn_id).is_none();
+            $self
+                .$field
+                .insert(value, $key.to_owned(), $txn_id, $max_committed_id);
+            assert!(
+                unique,
+                "Index key is non-unique for index `{}` of table `{}`",
+                stringify!($name),
+                stringify!($field),
+            );
+        }
+    };
+    (
+        $name:ident,
+        $field:ident :
+        $field_ty:ty;
+        ($self:ident, $key:ident, $value:ident, $txn_id:ident, $max_committed_id:ident)
+    ) => {
+        for value in index::$name::Indexes::$field($value) {
+            let unique = $self.$field.get(&value, $txn_id).is_none();
+            if unique {
+                $self
+                    .$field
+                    .insert(value, $key.to_owned(), $txn_id, $max_committed_id);
+            } else {
+                $self.$field.set_poisoned($txn_id);
             }
         }
     };
@@ -596,7 +654,7 @@ mod test {
         pub struct BarT {
             a: String,
         }
-        tables!(Foo(&'static str => String), Bar(u32 => BarT; index(a: String)));
+        tables!(Foo(&'static str => String), Bar(u32 => BarT; index(a: String; assert_unique)));
 
         let store = KvStore::new();
         store.table::<Bar>("owner").insert(

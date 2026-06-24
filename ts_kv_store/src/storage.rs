@@ -556,6 +556,10 @@ pub struct Table<D: schema::TableDesc, I> {
     ///
     /// Can be an over-approximation, but not an under-approximation.
     modified: Option<TxnMutations<D::Key>>,
+    /// A flag indicating if the table has become inconsistent.
+    ///
+    /// Currently this is used for indexes if multiple primary keys are stored for a single index key.
+    poisoned: VersionedValue<bool>,
     /// All indexes of this table (empty if there are no indexes or this table itself is an index).
     pub indexes: I,
 }
@@ -567,6 +571,7 @@ impl<D: schema::TableDesc, I: Default> Default for Table<D, I> {
             data: HashMap::new(),
             delete_mask: DeleteMask::None,
             modified: None,
+            poisoned: VersionedValue::new(false, TxnId::FIRST),
             indexes: I::default(),
         }
     }
@@ -583,6 +588,14 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
         }
     }
 
+    pub fn set_poisoned(&mut self, txn_id: TxnId) {
+        self.poisoned.set(true, txn_id);
+    }
+
+    pub fn is_poisoned(&self, txn_id: TxnId) -> bool {
+        *self.poisoned.get(txn_id).unwrap_or(&false)
+    }
+
     pub fn gc_txn(&mut self, txn_id: TxnId) {
         self.delete_mask = DeleteMask::None;
 
@@ -594,6 +607,8 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
             modified.txn_id, txn_id,
             "Found mismatched modified set to GC"
         );
+
+        self.poisoned.gc_txn(txn_id);
 
         for k in &modified.keys {
             if let Some(value) = self.data.get_mut(k) {
@@ -619,6 +634,10 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
             && modified.txn_id != txn_id
         {
             return Err(Error::TransactionFailed);
+        }
+
+        if self.is_poisoned(txn_id) {
+            return Err(crate::Error::NonUniqueIndexKey(D::name()));
         }
 
         match &self.delete_mask {
@@ -693,6 +712,9 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
         D::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        if self.is_poisoned(txn_id) {
+            return None;
+        }
         get_from_table::<D, Q>(&self.delete_mask, &self.data, key, txn_id)
     }
 
@@ -830,6 +852,8 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
                 "current transaction id less than committed id: {txn_id:?} < {max_committed_id:?}"
             );
         }
+
+        self.poisoned.set(false, txn_id);
 
         self.indexes.clear(txn_id, max_committed_id);
     }
