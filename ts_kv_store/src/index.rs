@@ -1724,10 +1724,8 @@ mod test_poison {
 
         let result = index_name.get("Alice");
         assert!(matches!(result, Err(AccessError::NonUniqueIndexKey(_))));
-        assert!(!result.is_none());
-        assert!(!result.is_some());
 
-        // The `panic`s check that the closure is not called.
+        // The `panic`s ensure that the closure is not called.
         let result = index_name.with("Alice", |_| panic!());
         assert!(matches!(result, Err(AccessError::NonUniqueIndexKey(_))));
 

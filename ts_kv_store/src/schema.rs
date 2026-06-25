@@ -372,16 +372,15 @@ macro_rules! match_helper_rhs_mut {
 ///     &'static str => Node;
 ///     index(a: u32);
 ///     index(b: String; assert_unique);
-///     index(c: String = |node: &Node| Some(format!("{}-{}", node.a, node.b)));
+///     index(c: String = |node: &Node| [format!("{}-{}", node.a, node.b)]);
 ///   )
 /// );
 /// ```
 ///
 /// This will create indexes on nodes for fields `a`, `b`, and `c`. `c`'s index key is
 /// computed by the specified closure, which is expected to return
-/// `impl IntoIterator<Item = I>` (where `I` is the index key type). Most commonly, this
-/// will likely be `Option`: you might want to return `None` in some cases if the value has
-/// an optional field or an index key can't be produced.
+/// `impl IntoIterator<Item = I>` (where `I` is the index key type), for example an `Option<I>` for
+/// zero or one index keys per value.
 ///
 /// Index fields must uniquely identify a row in the base table. If multiple rows in the base table
 /// have the same key in the index, then by default the index will be 'poisoned' and accessing the
@@ -489,7 +488,7 @@ macro_rules! tables {
             impl index::$name::Indexes {
                 $(
                     fn $field(val: &$value_ty) -> impl IntoIterator<Item = $field_ty> {
-                        ($crate::get_index_expr!($value_ty, $field, $field_ty $(, $get_idx)?))(val)
+                        ($crate::get_index_fn!($value_ty, $field $(, $get_idx)?))(val)
                     }
                 )*
             }
@@ -537,11 +536,11 @@ macro_rules! tables {
 
 #[doc(hidden)]
 #[macro_export]
-macro_rules! get_index_expr {
-    ($value_ty:ty, $field:ident, $field_ty:ty) => {
-        |value: &$value_ty| Some(value.$field.clone())
+macro_rules! get_index_fn {
+    ($value_ty:ty, $field:ident) => {
+        |value: &$value_ty| [value.$field.clone()]
     };
-    ($value_ty:ty, $field:ident, $field_ty:ty, $get_idx:expr) => {
+    ($value_ty:ty, $field:ident, $get_idx:expr) => {
         $get_idx
     };
 }
@@ -571,11 +570,11 @@ macro_rules! on_insert_each {
         $field_ty:ty;
         ($self:ident, $key:ident, $value:ident, $txn_id:ident, $max_committed_id:ident); assert_unique
     ) => {
-        for value in index::$name::Indexes::$field($value) {
-            let unique = $self.$field.get(&value, $txn_id).is_none();
+        for index_key in index::$name::Indexes::$field($value) {
+            let unique = $self.$field.get::<$field_ty>(&index_key, $txn_id).is_none();
             $self
                 .$field
-                .insert(value, $key.to_owned(), $txn_id, $max_committed_id);
+                .insert(index_key, $key.to_owned(), $txn_id, $max_committed_id);
             assert!(
                 unique,
                 "Index key is non-unique for index `{}` of table `{}`",
@@ -590,12 +589,12 @@ macro_rules! on_insert_each {
         $field_ty:ty;
         ($self:ident, $key:ident, $value:ident, $txn_id:ident, $max_committed_id:ident)
     ) => {
-        for value in index::$name::Indexes::$field($value) {
-            let unique = $self.$field.get(&value, $txn_id).is_none();
+        for index_key in index::$name::Indexes::$field($value) {
+            let unique = $self.$field.get::<$field_ty>(&index_key, $txn_id).is_none();
             if unique {
                 $self
                     .$field
-                    .insert(value, $key.to_owned(), $txn_id, $max_committed_id);
+                    .insert(index_key, $key.to_owned(), $txn_id, $max_committed_id);
             } else {
                 $self.$field.set_poisoned($txn_id);
             }
@@ -654,7 +653,10 @@ mod test {
         pub struct BarT {
             a: String,
         }
-        tables!(Foo(&'static str => String), Bar(u32 => BarT; index(a: String; assert_unique)));
+        tables!(
+            Foo(&'static str => String; index(len: usize = |v: &String| [v.len()])),
+            Bar(u32 => BarT; index(a: String; assert_unique))
+        );
 
         let store = KvStore::new();
         store.table::<Bar>("owner").insert(
@@ -667,6 +669,12 @@ mod test {
             .table_by::<index::Bar::a>("owner")
             .get("hello")
             .unwrap();
-        assert_eq!(value.a, "hello")
+        assert_eq!(value.a, "hello");
+
+        store
+            .table::<Foo>("owner")
+            .insert("foo", "hello".to_owned());
+        let value = store.table_by::<index::Foo::len>("owner").get(&5).unwrap();
+        assert_eq!(value, "hello");
     }
 }
