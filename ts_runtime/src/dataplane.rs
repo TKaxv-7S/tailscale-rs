@@ -64,7 +64,6 @@ pub type DiscoPacket = yoke::Yoke<&'static Packet<Plaintext>, ts_packet::Packet>
 
 #[derive(Clone)]
 pub struct IncomingDiscoMsg {
-    #[expect(dead_code)]
     pub transport: UnderlayTransportId,
     pub sender: DynEndpoint,
     pub packet: DiscoPacket,
