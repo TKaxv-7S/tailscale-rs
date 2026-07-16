@@ -2,13 +2,17 @@
 
 extern crate ts_disco_protocol as disco;
 
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use ts_bart::RoutingTable;
 use ts_overlay_router as or;
 use ts_packet::PacketMut;
 use ts_packetfilter::{FilterExt, IpProto};
-use ts_time::{Handle, Scheduler};
+use ts_time::{Handle, Scheduler, TimeRange};
 use ts_transport::{OverlayTransportId, PeerId, UnderlayTransportId};
 use ts_tunnel::{Endpoint, NodeKeyPair};
 use ts_underlay_router as ur;
@@ -18,10 +22,16 @@ mod packet_ident;
 
 pub use packet_ident::{PacketIdent, PacketType};
 
+/// Duration without traffic after which to remove a peer from the active map.
+const PEER_EXPIRATION: Duration = Duration::from_secs(45);
+
 /// A data plane subsystem that can be the subject of timer events.
 pub enum Subsystem {
     /// The wireguard component.
     Wireguard,
+
+    /// Peer activity garbage collection.
+    PeerGc,
 }
 
 /// Transforms packets to make tailscale happen.
@@ -42,11 +52,19 @@ pub struct DataPlane {
     /// The packet filter.
     pub packet_filter: Arc<dyn ts_packetfilter::Filter + Send + Sync>,
 
+    /// Per-peer timestamps of last outgoing data packets.
+    ///
+    /// Used to determine whether we should be running path discovery for this peer.
+    pub active_peers: HashMap<PeerId, Instant>,
+
     /// Events queued for future processing.
     pub events: Scheduler<Subsystem>,
 
     /// Next event for the wireguard subsystem.
     pub wg_next: Option<Handle<Subsystem>>,
+
+    /// Next event for the peer gc subsystem.
+    pub peer_gc_next: Option<Handle<Subsystem>>,
 }
 
 impl DataPlane {
@@ -60,7 +78,9 @@ impl DataPlane {
             or_in: Default::default(),
             events: Default::default(),
             packet_filter: Arc::new(ts_packetfilter::DropAllFilter),
+            active_peers: Default::default(),
             wg_next: None,
+            peer_gc_next: None,
         }
     }
 
@@ -72,8 +92,13 @@ impl DataPlane {
             loopback,
         } = self.or_out.route(packets);
 
+        let now = Instant::now();
+
         let to_wireguard = to_wireguard
             .into_iter()
+            .inspect(|(id, _)| {
+                self.active_peers.insert(*id, now);
+            })
             .map(|(k, v)| (ts_tunnel::PeerId(k.0), v))
             .collect::<Vec<_>>();
 
@@ -85,13 +110,7 @@ impl DataPlane {
             .ur_out
             .route(encrypted.into_iter().map(|(k, v)| (PeerId(k.0), v)));
 
-        if let Some(next) = self.wireguard.next_event()
-            && let Some(prev) = self
-                .wg_next
-                .replace(self.events.add(next, Subsystem::Wireguard))
-        {
-            prev.cancel();
-        }
+        self.ensure_events(now);
 
         OutboundResult { to_peers, loopback }
     }
@@ -205,20 +224,19 @@ impl DataPlane {
                 v
             });
 
+        let now = Instant::now();
+
         let to_peers = to_peers
             .into_iter()
-            .map(|(k, v)| (ts_transport::PeerId(k.0), v));
+            .map(|(k, v)| (ts_transport::PeerId(k.0), v))
+            .inspect(|(id, _)| {
+                self.active_peers.insert(*id, now);
+            });
 
         let to_local = self.or_in.route(to_local.flatten());
         let to_peers = self.ur_out.route(to_peers);
 
-        if let Some(next) = self.wireguard.next_event()
-            && let Some(prev) = self
-                .wg_next
-                .replace(self.events.add(next, Subsystem::Wireguard))
-        {
-            prev.cancel();
-        }
+        self.ensure_events(now);
 
         InboundResult {
             to_local,
@@ -245,6 +263,8 @@ impl DataPlane {
     pub fn process_events(&mut self) -> EventResult {
         let mut to_peers = HashMap::new();
         let now = Instant::now();
+        let mut should_gc = false;
+
         for event in self.events.dispatch(now) {
             match event {
                 Subsystem::Wireguard => {
@@ -252,13 +272,50 @@ impl DataPlane {
                     to_peers.extend(
                         res.to_peers
                             .into_iter()
-                            .map(|(id, pkts)| (ts_transport::PeerId(id.0), pkts)),
+                            .map(|(id, pkts)| (ts_transport::PeerId(id.0), pkts))
+                            .inspect(|(id, _)| {
+                                self.active_peers.insert(*id, now);
+                            }),
                     );
                 }
+                Subsystem::PeerGc => should_gc = true,
             }
         }
-        let to_peers = self.ur_out.route(to_peers);
 
+        if should_gc {
+            let _span =
+                tracing::trace_span!("peer gc", n_active_peers_pre = self.active_peers.len())
+                    .entered();
+
+            self.active_peers.retain(|id, &mut last_traffic| {
+                let elapsed = now - last_traffic;
+                let keep = elapsed < PEER_EXPIRATION;
+
+                if !keep {
+                    tracing::trace!(peer_id = %id, ?elapsed, "peer expired");
+                }
+
+                keep
+            });
+
+            tracing::trace!(n_active_peers_post = self.active_peers.len());
+
+            // remove so ensure_peer_gc sees there's no pending event and reschedules it
+            self.peer_gc_next = None;
+        }
+
+        let to_peers = self.ur_out.route(to_peers);
+        self.ensure_events(now);
+
+        EventResult { to_peers }
+    }
+
+    fn ensure_events(&mut self, now: Instant) {
+        self.ensure_wg();
+        self.ensure_peer_gc(now);
+    }
+
+    fn ensure_wg(&mut self) {
         if let Some(next) = self.wireguard.next_event()
             && let Some(prev) = self
                 .wg_next
@@ -266,8 +323,21 @@ impl DataPlane {
         {
             prev.cancel();
         }
+    }
 
-        EventResult { to_peers }
+    fn ensure_peer_gc(&mut self, now: Instant) {
+        if self.active_peers.is_empty()
+            && let Some(evt) = self.peer_gc_next.take()
+        {
+            evt.cancel();
+        }
+
+        if !self.active_peers.is_empty() && self.peer_gc_next.is_none() {
+            self.peer_gc_next = Some(self.events.add(
+                TimeRange::new_around(now + Duration::from_secs(10), Duration::from_millis(2500)),
+                Subsystem::PeerGc,
+            ));
+        }
     }
 }
 

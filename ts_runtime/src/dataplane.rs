@@ -8,7 +8,9 @@ use kameo::{
     actor::{ActorRef, Spawn},
     message::{Context, Message, StreamMessage},
 };
-use ts_dataplane::async_tokio::{FromOverlay, FromUnderlay, Rx, ToOverlay, ToUnderlay, Tx};
+use ts_dataplane::async_tokio::{
+    ActivePeers, FromOverlay, FromUnderlay, Rx, ToOverlay, ToUnderlay, Tx,
+};
 use ts_disco_protocol::{Packet, Plaintext};
 use ts_packet::PacketMut;
 use ts_transport::{OverlayTransportId, UnderlayTransportId};
@@ -74,7 +76,7 @@ impl kameo::Actor for DataplaneActor {
     type Error = Error;
 
     async fn on_start(env: Self::Args, slf: ActorRef<Self>) -> Result<Self, Self::Error> {
-        let (dataplane, disco, stun) =
+        let (dataplane, disco, stun, active_peers) =
             ts_dataplane::async_tokio::DataPlane::new(env.keys.node_keys.clone());
 
         let dataplane = Arc::new(dataplane);
@@ -91,6 +93,12 @@ impl kameo::Actor for DataplaneActor {
             tokio_stream::wrappers::UnboundedReceiverStream::new(stun)
                 .flat_map(tokio_stream::iter)
                 .map(StunInternal),
+            (),
+            (),
+        );
+
+        slf.attach_stream(
+            tokio_stream::wrappers::WatchStream::new(active_peers),
             (),
             (),
         );
@@ -172,6 +180,33 @@ impl Message<StreamMessage<StunInternal, (), ()>> for DataplaneActor {
             .publish_noretain(IncomingStunMsg(pkt.freeze()))
             .await
             .unwrap();
+    }
+}
+
+impl Message<StreamMessage<ActivePeers, (), ()>> for DataplaneActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: StreamMessage<ActivePeers, (), ()>,
+        ctx: &mut Context<Self, Self::Reply>,
+    ) {
+        let peers = match msg {
+            StreamMessage::Next(pkt) => pkt,
+            StreamMessage::Finished(_) => {
+                // TODO(npry): apply to all stream msg handlers
+                tracing::warn!("active peers stream died, killing dataplane");
+                ctx.stop();
+                return;
+            }
+            StreamMessage::Started(_) => {
+                return;
+            }
+        };
+
+        tracing::debug!(active_peers = ?peers, "new active_peers");
+
+        self.env.publish(peers).await.unwrap();
     }
 }
 

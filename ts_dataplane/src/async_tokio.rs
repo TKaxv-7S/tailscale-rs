@@ -1,8 +1,13 @@
 //! The packet processing dataplane, as a tokio task.
 
-use std::{collections::HashMap, convert::Infallible, ops::DerefMut, sync::atomic::AtomicU32};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
+    ops::DerefMut,
+    sync::{Arc, atomic::AtomicU32},
+};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use ts_packet::PacketMut;
 use ts_transport::{OverlayTransportId, PeerId, UnderlayTransportId};
 use ts_tunnel::NodeKeyPair;
@@ -32,6 +37,10 @@ pub type FromUnderlay = Vec<PacketMut>;
 pub type DiscoBatch = Vec<PacketMut>;
 /// A batch of stun packets received from an underlay transport.
 pub type StunBatch = Vec<PacketMut>;
+
+/// Hashset where membership indicates that a peer has had activity recently and we should run
+/// path discovery.
+pub type ActivePeers = Arc<HashSet<PeerId>>;
 
 /// Shorthand for a sender channel.
 pub type Tx<T> = mpsc::UnboundedSender<T>;
@@ -68,6 +77,9 @@ struct CoreState {
     disco_out: Tx<DiscoBatch>,
     /// Send handle for stun packets received from underlays.
     stun_out: Tx<StunBatch>,
+
+    /// Send handle for peer activity changes.
+    peer_activity_out: watch::Sender<ActivePeers>,
 }
 
 /// State that must be held during async polling.
@@ -85,13 +97,22 @@ impl DataPlane {
     /// otherwise all it can do is drop packets.
     ///
     /// The second and third elements of the return tuple are output queues for disco and
-    /// STUN messages, respectively.
-    pub fn new(my_key: NodeKeyPair) -> (Self, Rx<DiscoBatch>, Rx<StunBatch>) {
+    /// STUN messages, respectively. The fourth element represents the set of peers with recent
+    /// outgoing traffic, as tracked by the dataplane.
+    pub fn new(
+        my_key: NodeKeyPair,
+    ) -> (
+        Self,
+        Rx<DiscoBatch>,
+        Rx<StunBatch>,
+        watch::Receiver<ActivePeers>,
+    ) {
         let (overlay_up, overlay_down) = mpsc::unbounded_channel();
         let (underlay_down, underlay_up) = mpsc::unbounded_channel();
 
         let (disco_tx, disco_rx) = mpsc::unbounded_channel();
         let (stun_tx, stun_rx) = mpsc::unbounded_channel();
+        let (peer_tx, peer_rx) = watch::channel(Default::default());
 
         let sync = crate::DataPlane::new(my_key);
 
@@ -108,6 +129,7 @@ impl DataPlane {
                 sync,
                 stun_out: stun_tx,
                 disco_out: disco_tx,
+                peer_activity_out: peer_tx,
                 overlay_transports: Default::default(),
                 underlay_transports: Default::default(),
             }),
@@ -118,7 +140,7 @@ impl DataPlane {
             }),
         };
 
-        (dp, disco_rx, stun_rx)
+        (dp, disco_rx, stun_rx, peer_rx)
     }
 
     /// Allocate a new underlay transport.
@@ -242,6 +264,12 @@ impl DataPlane {
 
         let mut core = self.core_state.lock().await;
 
+        // To avoid cloning the active peer map repeatedly to compare it against the last state,
+        // compare the length before and after processing packets. It can only grow unless a GC ran
+        // (in process_events), so in all other cases no length change means no change at all.
+        let active_peer_count = core.sync.active_peers.len();
+        let mut possible_gc = false;
+
         let (to_peers, to_local) = match select_result {
             SelectResult::OverlayDown(overlay_down) => {
                 let OutboundResult { to_peers, loopback } =
@@ -269,10 +297,34 @@ impl DataPlane {
             }
             SelectResult::Event => {
                 let EventResult { to_peers } = core.sync.process_events();
+                possible_gc = true;
                 (Some(to_peers), None)
             }
             SelectResult::TransportsChanged => (None, None),
         };
+
+        if possible_gc || core.sync.active_peers.len() != active_peer_count {
+            // only consider membership in the map for whether the peer should be considered
+            // active, time-based expiration is only enforced by gc.
+            let new_active_peers = core
+                .sync
+                .active_peers
+                .keys()
+                .copied()
+                .collect::<HashSet<_>>();
+
+            core.peer_activity_out.send_if_modified(|cur| {
+                if &new_active_peers == cur.as_ref() {
+                    tracing::trace!("no active peers change");
+                    return false;
+                }
+
+                tracing::trace!("active peers updated");
+
+                *cur = Arc::new(new_active_peers);
+                true
+            });
+        }
 
         if let Some(to_peers) = to_peers {
             write_to_underlay(&core, to_peers).await;
