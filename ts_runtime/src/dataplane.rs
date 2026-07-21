@@ -63,7 +63,9 @@ impl DataplaneActor {
 pub type DiscoPacket = yoke::Yoke<&'static Packet<Plaintext>, ts_packet::Packet>;
 
 #[derive(Clone)]
+#[expect(dead_code)]
 pub struct IncomingDiscoMsg {
+    pub transport: UnderlayTransportId,
     pub sender: DynEndpoint,
     pub packet: DiscoPacket,
 }
@@ -85,6 +87,7 @@ struct DiscoInternal(DiscoBatch);
 #[derive(Debug, Clone)]
 #[expect(dead_code)]
 pub struct IncomingStunMsg {
+    pub transport: UnderlayTransportId,
     pub sender: DynEndpoint,
     pub pkt: ts_packet::Packet,
 }
@@ -147,7 +150,7 @@ impl Message<StreamMessage<DiscoInternal, (), ()>> for DataplaneActor {
         msg: StreamMessage<DiscoInternal, (), ()>,
         _ctx: &mut Context<Self, Self::Reply>,
     ) {
-        let (ep, bufs) = match msg {
+        let (transport_id, ep, bufs) = match msg {
             StreamMessage::Next(pkt) => pkt.0,
             _ => return,
         };
@@ -176,6 +179,7 @@ impl Message<StreamMessage<DiscoInternal, (), ()>> for DataplaneActor {
             .unwrap();
 
             let pkt = IncomingDiscoMsg {
+                transport: transport_id,
                 sender: ep.clone(),
                 packet: pkt,
             };
@@ -195,7 +199,7 @@ impl Message<StreamMessage<StunInternal, (), ()>> for DataplaneActor {
         msg: StreamMessage<StunInternal, (), ()>,
         _ctx: &mut Context<Self, Self::Reply>,
     ) {
-        let (ep, pkts) = match msg {
+        let (transport_id, ep, pkts) = match msg {
             StreamMessage::Next(pkt) => pkt.0,
             _ => return,
         };
@@ -203,6 +207,7 @@ impl Message<StreamMessage<StunInternal, (), ()>> for DataplaneActor {
         for pkt in pkts {
             self.env
                 .publish_noretain(IncomingStunMsg {
+                    transport: transport_id,
                     pkt: pkt.freeze(),
                     sender: ep.clone(),
                 })
