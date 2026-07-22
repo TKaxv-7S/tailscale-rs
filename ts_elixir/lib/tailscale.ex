@@ -16,21 +16,21 @@ defmodule Tailscale do
 
   @typedoc """
   An IPv4 address.
-    
+
   `tailscale` is capable of interpreting either the `m::inet` format or a `String`.
   """
   @type ip4_addr() :: :inet.ip4_address() | String.t()
 
   @typedoc """
   An IPv6 address.
-    
+
   `tailscale` is capable of interpreting either the `m::inet` format or a `String`.
   """
   @type ip6_addr() :: :inet.ip6_address() | String.t()
 
   @typedoc """
   An IP address (v4 or v6).
-    
+
   `tailscale` is capable of interpreting either the `m::inet` format or a `String`.
   """
   @type ip_addr() :: ip4_addr() | ip6_addr()
@@ -50,13 +50,16 @@ defmodule Tailscale do
   - `hostname`: the hostname this device will request. If omitted, uses the hostname the OS reports.
   - `tags`: tags the device will request.
   - `control_url`: the url of the control server to use.
+  - `ephemeral`: whether this node should be registered as ephemeral. Ephemeral nodes are removed
+    from the tailnet after being offline for a brief period.
   """
   @type options :: [
           auth_key: String.t(),
           keys: Tailscale.Keystate.t(),
           control_url: String.t(),
           hostname: String.t(),
-          tags: [String.t()]
+          tags: [String.t()],
+          ephemeral: boolean()
         ]
 
   @spec connect(String.t(), options()) :: {:ok, t()} | {:error, any()}
@@ -94,7 +97,7 @@ defmodule Tailscale do
   @spec ipv4_addr(t()) :: {:ok, :inet.ip4_address()} | {:error, any()}
   @doc """
   Get the current IPv4 address of this Tailscale node.
-    
+
   Blocks until the address is available.
   """
   def ipv4_addr(dev), do: Tailscale.Native.ipv4_addr(dev)
@@ -102,7 +105,7 @@ defmodule Tailscale do
   @spec ipv6_addr(t()) :: {:ok, :inet.ip6_address()} | {:error, any()}
   @doc """
   Get the current IPv6 address of this Tailscale node.
-    
+
   Blocks until the address is available.
 
   Note that this address is in `t::inet.ip6_address/0` format (16-bit segments), which may be

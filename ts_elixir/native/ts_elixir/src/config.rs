@@ -9,6 +9,7 @@ mod atoms {
         hostname,
         tags,
         auth_key,
+        ephemeral,
     }
 }
 
@@ -50,6 +51,10 @@ pub fn config_from_erl(
 
     if let Some(value) = erl_config.get(&atoms::auth_key()) {
         auth_key = Some(value.decode()?);
+    }
+
+    if let Some(value) = erl_config.get(&atoms::ephemeral()) {
+        config.ephemeral = value.decode()?;
     }
 
     Ok((config, auth_key))
