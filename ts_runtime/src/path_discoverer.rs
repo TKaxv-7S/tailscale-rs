@@ -37,7 +37,7 @@ use kameo_actors::scheduler::SetInterval;
 use smol_str::SmolStr;
 use tokio::time::MissedTickBehavior;
 use ts_dataplane::async_tokio::ActivePeers;
-use ts_disco_protocol::{CallMeMaybe, MessageType, Ping, Pong};
+use ts_disco_protocol::{CallMeMaybe, Ping, Pong};
 use ts_keys::DiscoPublicKey;
 use ts_transport::{DynEndpoint, PeerId, UnderlayTransportId};
 
