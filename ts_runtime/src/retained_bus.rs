@@ -78,12 +78,32 @@ where
             state.retained = Some(Box::new(message.clone()));
         }
 
+        let mut any_missing = false;
+
         for recip in state.recipients.values_mut() {
             let recip = recip.downcast_mut::<Recipient<M>>().unwrap();
 
-            if let Err(e) = recip.tell(message.clone()).await {
-                tracing::error!(error = %e, "");
+            // actor is dead (this is an expected case)
+            if recip.tell(message.clone()).await.is_err() {
+                any_missing = true;
             }
+        }
+
+        if any_missing {
+            state.recipients.retain(|id, recip| {
+                let recip = recip.downcast_ref::<Recipient<M>>().unwrap();
+
+                let retain = recip.is_alive();
+                if !retain {
+                    tracing::trace!(
+                        ?id,
+                        msgty = core::any::type_name::<M>(),
+                        "actor gone, remove subscription"
+                    );
+                }
+
+                retain
+            });
         }
     }
 }
