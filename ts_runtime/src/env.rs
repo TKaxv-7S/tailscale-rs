@@ -15,7 +15,7 @@ use crate::{
     Error, ErrorKind,
     error::ResultExt,
     registry,
-    registry::{Forward, Registry},
+    registry::{ErasedWeakRef, Forward, Registry},
     retained_bus::RetainedBus,
 };
 
@@ -78,12 +78,13 @@ impl Env {
     /// registered as the canonical actor of type `A`.
     ///
     /// If the return value is `Ok(Some(_))`, this registration replaced an existing registration
-    /// for the same name.
+    /// for the same name. The actor ref is erased, meaning that you must try to downcast it to a
+    /// `WeakActorRef<B>` for some actor type `B` if you need an `ActorRef` to send messages to.
     pub async fn register<A>(
         &self,
         name: Option<SmolStr>,
         slf: &ActorRef<A>,
-    ) -> Result<Option<WeakActorRef<A>>, Error>
+    ) -> Result<Option<ErasedWeakRef>, Error>
     where
         A: kameo::Actor,
     {

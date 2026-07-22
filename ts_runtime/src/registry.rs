@@ -135,22 +135,20 @@ impl<A> Message<Register<A>> for Registry
 where
     A: kameo::Actor + Any,
 {
-    type Reply = Option<WeakActorRef<A>>;
+    type Reply = Option<ErasedWeakRef>;
 
     async fn handle(
         &mut self,
         msg: Register<A>,
         _ctx: &mut Context<Self, Self::Reply>,
-    ) -> Option<WeakActorRef<A>> {
+    ) -> Option<ErasedWeakRef> {
         if let Some(pending) = self.pending_lookups.remove(&msg.id) {
             for sender in pending {
                 drop(sender.send(Ok(Box::new(Some(msg.aref.clone())))));
             }
         }
 
-        let previous = self.actors.insert(msg.id, Box::new(msg.aref))?;
-
-        *previous.downcast().unwrap()
+        self.actors.insert(msg.id, Box::new(msg.aref))
     }
 }
 
