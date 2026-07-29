@@ -10,6 +10,9 @@ use kameo::{
 };
 pub use kameo_actors::message_bus::Register;
 
+/// Type-erased [`SubState<M>`].
+type ErasedSubState = Box<dyn Any + Send>;
+
 /// A version of [`MessageBus`][kameo_actor::message_bus::MessageBus] optionally tracking retained
 /// state.
 ///
@@ -18,18 +21,73 @@ pub use kameo_actors::message_bus::Register;
 /// message immediately.
 #[derive(Default, kameo::Actor)]
 pub struct RetainedBus {
-    subscriptions: HashMap<TypeId, SubState>,
+    /// Essentially: `Map<M, SubState<M>>`.
+    subscriptions: HashMap<TypeId, ErasedSubState>,
 }
 
-/// A retained message store in [`SubState`].
-type RetainedMessage = Box<dyn Any + Send>;
-/// Type-erased message [`Recipient`] as stored in [`SubState`].
-type ErasedRecipient = Box<dyn Any + Send>;
+// The unwraps in this impl block are safe because they are only present on downcasts, which are
+// protected by the invariant that the value type for `TypeId::of::<M>()` is `SubState<M>`.
+impl RetainedBus {
+    fn get<M>(&self) -> Option<&SubState<M>>
+    where
+        M: Send + 'static,
+    {
+        let state = self.subscriptions.get(&TypeId::of::<M>())?;
+        Some(state.downcast_ref().unwrap())
+    }
 
-#[derive(Default)]
-struct SubState {
-    retained: Option<RetainedMessage>,
-    recipients: HashMap<ActorId, ErasedRecipient>,
+    fn get_mut<M>(&mut self) -> Option<&mut SubState<M>>
+    where
+        M: Send + 'static,
+    {
+        let state = self.subscriptions.get_mut(&TypeId::of::<M>())?;
+        Some(state.downcast_mut().unwrap())
+    }
+
+    fn entry_or_default<M>(&mut self) -> &mut SubState<M>
+    where
+        M: Send + 'static,
+    {
+        let state = self
+            .subscriptions
+            .entry(TypeId::of::<M>())
+            .or_insert_with(|| Box::new(SubState::<M>::default()));
+
+        state.downcast_mut().unwrap()
+    }
+
+    fn remove<M>(&mut self) -> Option<SubState<M>>
+    where
+        M: Send + 'static,
+    {
+        let ret = *self
+            .subscriptions
+            .remove(&TypeId::of::<M>())?
+            .downcast::<SubState<M>>()
+            .unwrap();
+
+        Some(ret)
+    }
+}
+
+struct SubState<M>
+where
+    M: Send + 'static,
+{
+    retained: Option<M>,
+    recipients: HashMap<ActorId, Recipient<M>>,
+}
+
+impl<M> Default for SubState<M>
+where
+    M: Send + 'static,
+{
+    fn default() -> Self {
+        Self {
+            retained: None,
+            recipients: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -72,17 +130,15 @@ where
         Publish { message, retained }: Publish<M>,
         _ctx: &mut Context<Self, Self::Reply>,
     ) {
-        let state = self.subscriptions.entry(message.type_id()).or_default();
+        let state = self.entry_or_default::<M>();
 
         if retained {
-            state.retained = Some(Box::new(message.clone()));
+            state.retained = Some(message.clone());
         }
 
         let mut any_missing = false;
 
         for recip in state.recipients.values_mut() {
-            let recip = recip.downcast_mut::<Recipient<M>>().unwrap();
-
             // actor is dead (this is an expected case)
             if recip.tell(message.clone()).await.is_err() {
                 any_missing = true;
@@ -91,8 +147,6 @@ where
 
         if any_missing {
             state.recipients.retain(|id, recip| {
-                let recip = recip.downcast_ref::<Recipient<M>>().unwrap();
-
                 let retain = recip.is_alive();
                 if !retain {
                     tracing::trace!(
@@ -119,21 +173,16 @@ where
         Register(recip): Register<M>,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let state = self.subscriptions.entry(TypeId::of::<M>()).or_default();
+        let state = self.entry_or_default::<M>();
 
         if let Some(retained) = &state.retained
             && !state.recipients.contains_key(&recip.id())
-            && let Err(e) = recip
-                .tell(retained.downcast_ref::<M>().unwrap().clone())
-                .await
+            && let Err(e) = recip.tell(retained.clone()).await
         {
             tracing::error!(error = %e);
         }
 
-        state
-            .recipients
-            .insert(recip.id(), Box::new(recip))
-            .map(|old| *old.downcast().unwrap())
+        state.recipients.insert(recip.id(), recip)
     }
 }
 
@@ -152,11 +201,10 @@ where
         _: GetRetained<M>,
         _: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let state = self.subscriptions.get(&TypeId::of::<M>())?;
+        let state = self.get::<M>()?;
         let ret = state.retained.as_ref()?;
-        let ret = ret.downcast_ref::<M>().unwrap().clone();
 
-        Some(ret)
+        Some(ret.clone())
     }
 }
 
@@ -185,26 +233,88 @@ where
         Unregister { actor_id, .. }: Unregister<M>,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let type_id = TypeId::of::<M>();
-
-        let Some(state) = self.subscriptions.get_mut(&type_id) else {
+        let Some(state) = self.get_mut::<M>() else {
             return (None, None);
         };
 
-        let ret = state
-            .recipients
-            .remove(&actor_id)
-            .map(|x| *x.downcast().unwrap());
+        let ret = state.recipients.remove(&actor_id);
 
         let state = if state.recipients.is_empty() {
-            self.subscriptions
-                .remove(&type_id)
-                .and_then(|state| state.retained)
-                .map(|x| *x.downcast().unwrap())
+            self.remove::<M>().and_then(|state| state.retained)
         } else {
             None
         };
 
         (ret, state)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use kameo::actor::{ActorRef, Spawn};
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    /// Ensure that the downcasts are of the correct types.
+    #[test]
+    fn basic() {
+        type T = ();
+
+        let mut bus = RetainedBus::default();
+
+        let ent = bus.entry_or_default::<T>();
+        assert!(ent.retained.is_none());
+        assert!(ent.recipients.is_empty());
+
+        assert!(bus.get::<T>().is_some());
+        assert!(bus.get_mut::<T>().is_some());
+
+        let ent = bus.remove::<T>().unwrap();
+        assert!(ent.retained.is_none());
+        assert!(ent.recipients.is_empty());
+    }
+
+    #[tokio::test]
+    async fn bus_basic() {
+        let bus = RetainedBus::spawn_default();
+        bus.wait_for_startup_result().await.unwrap();
+
+        #[derive(kameo::Actor)]
+        struct Dummy(Option<oneshot::Sender<()>>);
+
+        #[kameo::messages]
+        impl Dummy {
+            #[message(ctx)]
+            async fn test(&self, bus: ActorRef<RetainedBus>, ctx: &mut Context<Self, ()>) {
+                bus.ask(Register(ctx.actor_ref().clone().recipient::<Test2>()))
+                    .await
+                    .unwrap();
+
+                bus.tell(Publish::unretained(Test2)).try_send().unwrap();
+            }
+
+            #[message]
+            fn test2(&mut self) {
+                self.0.take().unwrap().send(()).unwrap();
+            }
+        }
+
+        impl Clone for Test2 {
+            fn clone(&self) -> Self {
+                Self
+            }
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let dummy = Dummy::spawn(Dummy(Some(tx)));
+        dummy.ask(Test { bus: bus.clone() }).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), rx)
+            .await
+            .unwrap()
+            .unwrap()
     }
 }
