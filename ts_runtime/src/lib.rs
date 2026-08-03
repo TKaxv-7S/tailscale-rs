@@ -112,6 +112,10 @@ impl kameo::Actor for Runtime {
         .spawn()
         .await;
 
+        control_runner::DialerActor::supervise(&slf, env.clone())
+            .spawn()
+            .await;
+
         ControlRunner::supervise(
             &slf,
             control_runner::Params {

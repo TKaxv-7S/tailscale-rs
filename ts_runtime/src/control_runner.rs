@@ -97,41 +97,16 @@ impl kameo::Actor for ControlRunner {
     type Error = ControlRunnerError;
 
     async fn on_start(params: Params, slf: ActorRef<Self>) -> Result<Self, Self::Error> {
-        // NOTE(npry): ideally, we would use a monitor here. We actively don't want to link the
-        // dialer, because if _we_ die, the dialer must not, as its whole goal is to outlive us
-        // and provide a next-address in the presence of errors. But we want to take action in
-        // response to the dialer panicking, probably involving killing our whole supervision tree
-        // because something must be quite wrong. This can't be done with links without changing
-        // the `kameo::Actor` implementation of the dialer. That's inappropriate because it's our
-        // semantics that want to adapt to its behavior -- it shouldn't need to do adopt custom
-        // behavior to ignore our DOWN messages because we have specific requirements.
-        //
-        // Having the dialer supervise us would solve this specific problem, but is semantically
-        // incorrect because it's an internal implementation detail of this module (but the Runtime
-        // actor would have to construct the dialer directly for the supervision tree to be right).
-        // Logically (from the perspective of runtime code organization) we own the dialer, so even
-        // though it would mechanistically work to have it supervise us, it doesn't make sense.
-        //
-        // Unfortunately, kameo doesn't currently support monitors. I'm leaving this note as a clear
-        // example of a situation where those semantics are needed.
-        let (_created, dialer) = params
+        let client = params
             .env
-            .ensure::<DialerActor, _, _>(None, {
-                let env = params.env.clone();
-
-                async || DialerActor {
-                    dialer: Default::default(),
-                    env,
-                }
-            })
+            .ask::<DialerActor, _>(
+                None,
+                DialNext {
+                    url: params.config.server_url.clone(),
+                },
+                true,
+            )
             .await?;
-
-        let client = dialer
-            .ask(DialNext {
-                url: params.config.server_url.clone(),
-            })
-            .await
-            .map_err(|e| e.unwrap_err())?;
 
         Task::supervise_with(&slf, {
             let aref = slf.downgrade();
@@ -456,7 +431,7 @@ impl Message<StreamMessage<Arc<StateUpdate>, (), ()>> for ControlRunner {
                     UpdateDialPlan {
                         dial_plan: dial_plan.clone(),
                     },
-                    false,
+                    true,
                 )
                 .await
                 .unwrap()
@@ -570,10 +545,24 @@ impl Message<StunAddress> for ControlRunner {
     }
 }
 
-#[derive(kameo::Actor)]
-struct DialerActor {
+/// Control server dialer.
+pub struct DialerActor {
     dialer: ControlDialer,
     env: Env,
+}
+
+impl kameo::Actor for DialerActor {
+    type Args = Env;
+    type Error = crate::Error;
+
+    async fn on_start(env: Env, slf: ActorRef<Self>) -> Result<Self, Self::Error> {
+        env.register(None, &slf).await?;
+
+        Ok(Self {
+            dialer: Default::default(),
+            env,
+        })
+    }
 }
 
 #[kameo::messages]
