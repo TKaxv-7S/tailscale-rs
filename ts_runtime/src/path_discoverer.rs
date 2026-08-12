@@ -164,6 +164,9 @@ type TxId = [u8; 12];
 
 const PROBE_PERIOD: Duration = Duration::from_millis(5_000);
 
+/// Duration after which peers' "seen endpoints" are cleaned up if they haven't sent traffic.
+const SEEN_ENDPOINTS_TIMEOUT: Duration = Duration::from_millis(30_000);
+
 enum ProbeState {
     /// This probe is in-flight with the given transaction id. It was sent at `sent`.
     InFlight { transaction: TxId, sent: Instant },
@@ -227,6 +230,13 @@ struct PeerPd {
     /// Endpoints for this peer derived from the most recent
     /// [`CallMeMaybe`][ts_disco_protocol::CallMeMaybe] disco message.
     endpoints_cmm: HashSet<DynEndpoint>,
+
+    /// Endpoints for which we've seen disco traffic arrive from this peer, mapped to the instant at
+    /// which we most recently saw that traffic.
+    ///
+    /// We always try to reach out back to the peer over these endpoints, even if they're not
+    /// sent by control or in a `CallMeMaybe`.
+    seen_peer_endpoints: HashMap<DynEndpoint, Instant>,
 
     env: Env,
 }
@@ -315,7 +325,11 @@ impl PeerPd {
         }
 
         // Send pings for all non-disco-coordinator endpoints.
-        for ep in self.endpoints_cmm.union(&self.endpoints_ctrl) {
+        let mut eps = self.seen_peer_endpoints.keys().collect::<HashSet<_>>();
+        eps.extend(&self.endpoints_cmm);
+        eps.extend(&self.endpoints_ctrl);
+
+        for ep in eps {
             if ep.is_disco_coordinator() {
                 continue;
             }
@@ -385,6 +399,16 @@ impl PeerPd {
 
         tracing::trace!(tx_id = ?format_args!("{:x?}", ts_hexdump::IterFmt::contiguous(&tx_id)), "sent disco ping");
     }
+
+    fn gc_seen_endpoints(&mut self) {
+        let now = Instant::now();
+
+        self.seen_peer_endpoints.retain(|_k, &mut v| {
+            let age = now - v;
+
+            age <= SEEN_ENDPOINTS_TIMEOUT
+        });
+    }
 }
 
 /// Periodic maintenance message triggering probes.
@@ -426,6 +450,7 @@ impl kameo::Actor for PeerPd {
             endpoints_cmm: Default::default(),
             coord_endpoints_ctrl: Default::default(),
             endpoints_ctrl: Default::default(),
+            seen_peer_endpoints: Default::default(),
         })
     }
 }
@@ -434,6 +459,7 @@ impl Message<ScheduleProbe> for PeerPd {
     type Reply = ();
 
     async fn handle(&mut self, _: ScheduleProbe, _: &mut Context<Self, Self::Reply>) {
+        self.gc_seen_endpoints();
         self.start_probes().await;
     }
 }
@@ -452,7 +478,7 @@ impl Message<Arc<PeerState>> for PeerPd {
                 .drain()
                 .chain(self.coord_endpoints_ctrl.drain())
             {
-                if self.endpoints_cmm.contains(&ep) {
+                if self.endpoints_cmm.contains(&ep) || self.seen_peer_endpoints.contains_key(&ep) {
                     continue;
                 }
 
@@ -519,6 +545,12 @@ impl Message<IncomingDiscoMsg> for PeerPd {
     #[tracing::instrument(skip_all, fields(sender = ?msg.sender, transport_id = ?msg.transport))]
     async fn handle(&mut self, msg: IncomingDiscoMsg, _ctx: &mut Context<Self, Self::Reply>) {
         let pkt = msg.packet.get();
+
+        if Some(pkt.sender_pubkey()) != self.disco_key.as_ref() {
+            return;
+        }
+
+        self.seen_peer_endpoints.insert(msg.sender, Instant::now());
 
         let Some(pong) = pkt.as_msg::<Pong>() else {
             return;
