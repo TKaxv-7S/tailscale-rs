@@ -11,7 +11,7 @@ use kameo::{
 };
 use ts_control::{
     ControlDialer, DialPlan, Endpoint, Error as ControlError, Node, RegistrationError, StateUpdate,
-    client::{HttpConn, handle_ping, send_map_request},
+    client::{HttpConn, handle_ping, map_stream, send_map_request},
 };
 
 use crate::{
@@ -248,15 +248,26 @@ impl ControlRunner {
 }
 
 impl ControlRunner {
-    async fn update_map_request(&self) {
-        let RegState::Registered(conn) = &self.state else {
-            tracing::debug!("attempt to update map request while not registered");
-            return;
+    /// Call `f` with a map request built from the current control actor state.
+    ///
+    /// `stream` dictates whether the request is built for a streaming netmap response or as a
+    /// request to update to this node's fields in control.
+    ///
+    /// This takes a closure rather than returning the built request for lifetime reasons.
+    async fn with_map_request<T>(
+        &self,
+        stream: bool,
+        f: impl AsyncFnOnce(ts_control::MapRequest) -> T,
+    ) -> T {
+        let mut mrb = ts_control::MapRequestBuilder::new(&self.params.env.keys);
+
+        mrb = if stream {
+            mrb.as_stream()
+        } else {
+            mrb.as_request()
         };
 
-        let mut mrb = ts_control::MapRequestBuilder::new(&self.params.env.keys)
-            .as_request()
-            .endpoints(self.endpoints.clone());
+        mrb = mrb.endpoints(self.endpoints.clone());
 
         if let Some(hostname) = self.params.config.hostname.as_deref() {
             mrb = mrb.hostname(hostname);
@@ -284,11 +295,23 @@ impl ControlRunner {
         host_info.app = &client_name;
         host_info.ipn_version = ts_control::PKG_VERSION;
 
-        send_map_request(
-            request,
-            &self.params.config.server_url.join("machine/map").unwrap(),
-            conn,
-        )
+        f(request).await
+    }
+
+    async fn update_map_request(&self) {
+        let RegState::Registered(conn) = &self.state else {
+            tracing::debug!("attempt to update map request while not registered");
+            return;
+        };
+
+        self.with_map_request(false, async |req| {
+            send_map_request(
+                req,
+                &self.params.config.server_url.join("machine/map").unwrap(),
+                conn,
+            )
+            .await
+        })
         .await
         .unwrap();
     }
@@ -346,15 +369,16 @@ impl Message<RegisterResult> for ControlRunner {
             }
         }
 
-        let stream = ts_control::client::start_stream(
-            &self.params.config.server_url,
-            &self.params.env.keys,
-            &self.params.config,
-            conn,
-        )
-        .await
-        .unwrap()
-        .map(Arc::new);
+        let reader = self
+            .with_map_request(true, async |req| {
+                let map_url = self.params.config.server_url.join("machine/map").unwrap();
+
+                send_map_request(req, &map_url, &conn).await
+            })
+            .await
+            .unwrap();
+
+        let stream = map_stream(reader).map(Arc::new);
 
         ctx.actor_ref().attach_stream(stream.boxed(), (), ());
     }

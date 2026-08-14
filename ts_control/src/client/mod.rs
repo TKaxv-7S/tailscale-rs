@@ -23,6 +23,11 @@ pub use register::{RegistrationError, register};
 pub type HttpConn = Http2<BytesBody>;
 
 /// Start the netmap stream. This connection should already be registered successfully.
+///
+/// This is a convenience helper for callers without a strong opinion on the information
+/// included in their initial map request: sophisticated callers that have hostinfo/netinfo or other
+/// fields to populate should manually [`send_map_request`] with their desired request and
+/// [`map_stream`] on the result.
 pub async fn start_stream(
     control_url: &Url,
     node_keys: &ts_keys::NodeState,

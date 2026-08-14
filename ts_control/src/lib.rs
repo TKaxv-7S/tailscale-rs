@@ -32,7 +32,7 @@ pub use node::{
     Id as NodeId, Node, NodeLastSeen, NodeStatus, NodeUpdate, StableId as StableNodeId,
     TailnetAddress,
 };
-pub use ts_control_serde::{Endpoint, EndpointType};
+pub use ts_control_serde::{Endpoint, EndpointType, MapRequest};
 
 /// An error which occurred while connecting to the control server or control plane.
 #[derive(Debug, thiserror::Error, Clone, Eq, PartialEq)]
