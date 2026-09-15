@@ -155,37 +155,52 @@ impl Message<StreamMessage<DiscoInternal, (), ()>> for DataplaneActor {
         };
 
         for mut buf in bufs {
-            let pkt = match Packet::from_encrypted_bytes_mut(buf.as_mut()) {
-                Ok(pkt) => pkt,
-                Err(e) => {
-                    tracing::error!(error = %e, "parsing disco message:\n{}",
-                        buf.iter().hexdump_string(Case::Lower)
-                    );
-                    return;
-                }
-            };
-
-            if let Err(e) = pkt.decrypt_in_place(&self.env.keys.disco_keys.private) {
-                tracing::error!(error = %e, "decrypting disco message");
-                return;
-            };
-
-            let pkt = yoke::Yoke::<&'static Packet<Plaintext>, _>::try_attach_to_cart(
-                buf.freeze(),
-                // SAFETY: we just parsed this from the same buffer, so type/version are set correctly.
-                |buf| unsafe { Packet::from_bytes_unchecked(buf) },
+            let pkt = tracing::debug_span!(
+                "disco_ingest",
+                ?transport_id,
+                ?ep,
+                sender_disco = tracing::field::Empty
             )
-            .unwrap();
+            .in_scope::<_, Option<IncomingDiscoMsg>>(|| {
+                let pkt = match Packet::from_encrypted_bytes_mut(buf.as_mut()) {
+                    Ok(pkt) => pkt,
+                    Err(e) => {
+                        tracing::error!(error = %e, "parsing disco message:\n{}",
+                            buf.iter().hexdump_string(Case::Lower)
+                        );
+                        return None;
+                    }
+                };
 
-            let pkt = IncomingDiscoMsg {
-                transport: transport_id,
-                sender: ep.clone(),
-                packet: pkt,
-            };
+                tracing::Span::current()
+                    .record("sender_disco", tracing::field::display(pkt.sender_pubkey()));
 
-            tracing::trace!(?pkt, "decrypted disco message");
+                if let Err(e) = pkt.decrypt_in_place(&self.env.keys.disco_keys.private) {
+                    tracing::error!(error = %e, "decrypting disco message");
+                    return None;
+                };
 
-            self.env.publish_noretain(pkt).await.unwrap();
+                let pkt = yoke::Yoke::<&'static Packet<Plaintext>, _>::try_attach_to_cart(
+                    buf.freeze(),
+                    // SAFETY: we just parsed this from the same buffer, so type/version are set correctly.
+                    |buf| unsafe { Packet::from_bytes_unchecked(buf) },
+                )
+                .unwrap();
+
+                let pkt = IncomingDiscoMsg {
+                    transport: transport_id,
+                    sender: ep.clone(),
+                    packet: pkt,
+                };
+
+                tracing::trace!(?pkt, "decrypted disco message");
+
+                Some(pkt)
+            });
+
+            if let Some(pkt) = pkt {
+                self.env.publish_noretain(pkt).await.unwrap();
+            }
         }
     }
 }
