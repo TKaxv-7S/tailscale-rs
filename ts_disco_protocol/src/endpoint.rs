@@ -87,7 +87,7 @@ impl Endpoint {
         };
 
         Self {
-            addr: zerocopy::transmute!(ip.segments()),
+            addr: zerocopy::transmute!(ip.octets()),
             port: zerocopy::U16::new(sa.port()),
         }
     }
@@ -120,7 +120,7 @@ impl From<Endpoint> for SocketAddr {
 impl From<SocketAddrV6> for Endpoint {
     fn from(value: SocketAddrV6) -> Self {
         Self {
-            addr: zerocopy::transmute!(value.ip().segments()),
+            addr: zerocopy::transmute!(value.ip().octets()),
             port: value.port().into(),
         }
     }
@@ -129,5 +129,36 @@ impl From<SocketAddrV6> for Endpoint {
 impl From<SocketAddr> for Endpoint {
     fn from(value: SocketAddr) -> Self {
         Self::from_socket_addr(value)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use core::str::FromStr;
+
+    use zerocopy::{FromBytes, IntoBytes};
+
+    use super::*;
+
+    #[test]
+    fn convert_basic() {
+        const BYTES: [u8; 18] = [
+            0x26, 0x00, 0xab, 0xcd, 0xef, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+            0x0a, 0x0b, 0xa5, 0xb5,
+        ];
+
+        let addr = Ipv6Addr::from_str("2600:abcd:ef01:0203:0405:0607:0809:0a0b").unwrap();
+        let ep = Endpoint::read_from_bytes(&BYTES).unwrap();
+
+        assert_eq!(ep.addr_v6(), addr);
+        assert_eq!(ep.port(), 0xa5b5);
+
+        let sa = ep.socket_addr();
+        assert_eq!(sa.ip(), IpAddr::V6(addr));
+        assert_eq!(sa.port(), 0xa5b5);
+
+        let ep2 = Endpoint::from(sa);
+        assert_eq!(ep2, ep);
+        assert_eq!(ep2.as_bytes(), BYTES);
     }
 }
