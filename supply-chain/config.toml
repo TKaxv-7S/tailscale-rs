@@ -127,9 +127,6 @@ audit-as-crates-io = false
 [policy.ts_transport]
 audit-as-crates-io = false
 
-[policy.ts_transport_tun]
-audit-as-crates-io = false
-
 [policy.ts_tunnel]
 audit-as-crates-io = false
 

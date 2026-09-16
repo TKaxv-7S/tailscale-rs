@@ -6425,21 +6425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ts_transport_tun"
-version = "0.6.1"
-dependencies = [
- "bytes",
- "ipnet",
- "serde",
- "thiserror 2.0.18",
- "tracing",
- "ts_hexdump",
- "ts_packet",
- "ts_transport",
- "tun-rs",
-]
-
-[[package]]
 name = "ts_tunnel"
 version = "0.6.1"
 dependencies = [

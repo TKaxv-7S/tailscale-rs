@@ -27,7 +27,7 @@ tracing.workspace = true
 tokio = { workspace = true, optional = true, features = ["time"] }
 
 # Required dependencies for the "tun" feature.
-tun-rs = { version = "2.8", optional = true, features = ["interruptible"] }
+tun-rs = { version = "2.8", optional = true, features = ["interruptible", "async"] }
 
 [dev-dependencies]
 # Required dependencies for benchmarks and examples.

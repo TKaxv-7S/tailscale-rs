@@ -95,7 +95,6 @@ Crates that communicate with other Tailscale nodes on the tailnet. The data plan
 
   - [`ts_transport`](ts_transport/src/lib.rs): traits that define transports and how they move traffic in and out of the overlay/underlay network.
   - [`ts_derp`](ts_derp/src/lib.rs): an underlay transport that exchanges packets between nodes via Designated Encrypted Relay for Packets (DERP) relay servers.
-  - [`ts_transport_tun`](ts_transport_tun/src/lib.rs): an overlay transport that exposes a TUN device on the local machine to send/receive packets on the overlay network (tailnet).
 
 #### Tunneling
 

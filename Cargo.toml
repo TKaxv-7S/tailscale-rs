@@ -43,7 +43,6 @@ members = [
     "ts_time",
     "ts_tls_util",
     "ts_transport",
-    "ts_transport_tun",
     "ts_underlay_router",
     "ts_tunnel",
 ]
@@ -150,7 +149,6 @@ ts_runtime = { path = "ts_runtime", version = "0.6.1" }
 ts_test_util = { path = "ts_test_util" }
 ts_time = { path = "ts_time", version = "0.6.1" }
 ts_transport = { path = "ts_transport", version = "0.6.1" }
-ts_transport_tun = { path = "ts_transport_tun", version = "0.6.1" }
 ts_underlay_router = { path = "ts_underlay_router", version = "0.6.1" }
 ts_tunnel = { path = "ts_tunnel", version = "0.6.1" }
 
