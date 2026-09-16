@@ -12,9 +12,9 @@ rust-version.workspace = true
 
 [dependencies]
 # Our crates.
-ts_packet.workspace = true
-ts_hexdump.workspace = true
 ts_keys.workspace = true
+ts_packet.workspace = true
+ts_util.workspace = true
 
 smallbox = { version = "0.8", default-features = false }
 dyn-hash = "1.0"

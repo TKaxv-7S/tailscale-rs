@@ -1,4 +1,3 @@
-
 # cargo-vet config file
 
 [cargo-vet]
@@ -53,12 +52,6 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.ts_ffi]
-audit-as-crates-io = false
-
-[policy.ts_future_util]
-audit-as-crates-io = false
-
-[policy.ts_hexdump]
 audit-as-crates-io = false
 
 [policy.ts_http_util]

@@ -1,14 +1,4 @@
-#![doc = include_str!("../README.md")]
-#![no_std]
-
-#[cfg(feature = "alloc")]
-extern crate alloc;
-
 use core::{fmt, iter::FusedIterator};
-
-mod iter;
-
-pub use iter::IterFmt;
 
 /// The 16 hexadecimal digits as `char`s, with digits a-f as lowercase.
 const LOWERCASE_HEX_CHARS: [char; 16] = [
@@ -64,16 +54,6 @@ pub enum Case {
 /// - U+007B ..= U+007E { | } ~
 ///
 /// All other characters are considered unprintable, and are represented as a `'.'` character.
-///
-/// # Examples
-/// ```
-/// # use ts_hexdump::get_ascii_char_for_byte;
-/// assert_eq!(get_ascii_char_for_byte(0x00), '.');
-/// assert_eq!(get_ascii_char_for_byte(0x20), '.');
-/// assert_eq!(get_ascii_char_for_byte(0x21), '!');
-/// assert_eq!(get_ascii_char_for_byte(0x41), 'A');
-/// assert_eq!(get_ascii_char_for_byte(0x7F), '.');
-/// ```
 pub fn get_ascii_char_for_byte(byte: u8) -> char {
     char::from_u32(byte as u32)
         .map(|v| {
@@ -89,18 +69,6 @@ pub fn get_ascii_char_for_byte(byte: u8) -> char {
 /// Returns the 2-`char` representation of the given byte in hexadecimal format, eg
 /// `0x1A -> ['1', 'A']`, with capitalization of digits A-F dependent on the `case` parameter.  The
 /// returned characters are in `[hi_nybble, lo_nybble]` order.
-///
-/// # Examples
-/// ```
-/// # use ts_hexdump::{Case, get_hex_chars_for_byte};
-/// assert_eq!(get_hex_chars_for_byte(0x00, Case::Upper), ['0', '0']);
-/// assert_eq!(get_hex_chars_for_byte(0x20, Case::Upper), ['2', '0']);
-/// assert_eq!(get_hex_chars_for_byte(0x20, Case::Lower), ['2', '0']);
-/// assert_eq!(get_hex_chars_for_byte(0x21, Case::Upper), ['2', '1']);
-/// assert_eq!(get_hex_chars_for_byte(0x4C, Case::Upper), ['4', 'C']);
-/// assert_eq!(get_hex_chars_for_byte(0x4C, Case::Lower), ['4', 'c']);
-/// assert_eq!(get_hex_chars_for_byte(0x7F, Case::Upper), ['7', 'F']);
-/// ```
 pub fn get_hex_chars_for_byte(byte: u8, case: Case) -> [char; 2] {
     let lo_nybble = (byte & 0x0f) as usize;
     let high_nybble = ((byte & 0xf0) >> 4) as usize;
@@ -239,11 +207,11 @@ pub trait AsHexExt: IntoIterator + private::Sealed {
     ///
     /// # Examples
     /// ```
-    /// # use ts_hexdump::{AsHexExt, Case};
+    /// # use ts_util::fmt::{AsHexExt, HexCase};
     /// let buf = b"Hello Tailscale!";
-    /// let hsl = buf.iter().hex(Case::Lower).flatten().collect::<String>();
+    /// let hsl = buf.iter().hex(HexCase::Lower).flatten().collect::<String>();
     /// assert_eq!(hsl, "48656c6c6f205461696c7363616c6521");
-    /// let hsu = buf.iter().hex(Case::Upper).flatten().collect::<String>();
+    /// let hsu = buf.iter().hex(HexCase::Upper).flatten().collect::<String>();
     /// assert_eq!(hsu, "48656C6C6F205461696C7363616C6521");
     /// ```
     fn hex(self, case: Case) -> HexIter<Self>
@@ -259,11 +227,11 @@ pub trait AsHexExt: IntoIterator + private::Sealed {
     ///
     /// # Examples
     /// ```
-    /// # use ts_hexdump::{AsHexExt, Case};
+    /// # use ts_util::fmt::{AsHexExt, HexCase};
     /// let buf = b"Hello Tailscale!";
-    /// let hdl = buf.iter().hexdump(Case::Lower).flatten().collect::<String>();
+    /// let hdl = buf.iter().hexdump(HexCase::Lower).flatten().collect::<String>();
     /// assert_eq!(hdl, "48 65 6c 6c 6f 20 54 61   69 6c 73 63 61 6c 65 21   Hello.Tailscale!\n");
-    /// let hdu = buf.iter().hexdump(Case::Upper).flatten().collect::<String>();
+    /// let hdu = buf.iter().hexdump(HexCase::Upper).flatten().collect::<String>();
     /// assert_eq!(hdu, "48 65 6C 6C 6F 20 54 61   69 6C 73 63 61 6C 65 21   Hello.Tailscale!\n");
     /// ```
     fn hexdump(self, case: Case) -> HexdumpIter<Self>
@@ -289,9 +257,9 @@ pub trait AsHexExt: IntoIterator + private::Sealed {
 /// # Examples
 ///
 /// ```
-/// # use ts_hexdump::{hex_fmt, Case};
+/// # use ts_util::fmt::{hex_fmt, HexCase};
 /// let mut s = String::new();
-/// hex_fmt(&[0xab, 0xcd, 0xef], Case::Lower, &mut s).unwrap();
+/// hex_fmt(&[0xab, 0xcd, 0xef], HexCase::Lower, &mut s).unwrap();
 /// assert_eq!("abcdef", s);
 /// ```
 pub fn hex_fmt<'a>(
@@ -317,3 +285,28 @@ pub fn hex_fmt<'a>(
 }
 
 impl<'a, I: IntoIterator<Item = &'a u8>> AsHexExt for I {}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn ascii_for_byte() {
+        assert_eq!(get_ascii_char_for_byte(0x00), '.');
+        assert_eq!(get_ascii_char_for_byte(0x20), '.');
+        assert_eq!(get_ascii_char_for_byte(0x21), '!');
+        assert_eq!(get_ascii_char_for_byte(0x41), 'A');
+        assert_eq!(get_ascii_char_for_byte(0x7F), '.');
+    }
+
+    #[test]
+    fn hex_chars_for_byte() {
+        assert_eq!(get_hex_chars_for_byte(0x00, Case::Upper), ['0', '0']);
+        assert_eq!(get_hex_chars_for_byte(0x20, Case::Upper), ['2', '0']);
+        assert_eq!(get_hex_chars_for_byte(0x20, Case::Lower), ['2', '0']);
+        assert_eq!(get_hex_chars_for_byte(0x21, Case::Upper), ['2', '1']);
+        assert_eq!(get_hex_chars_for_byte(0x4C, Case::Upper), ['4', 'C']);
+        assert_eq!(get_hex_chars_for_byte(0x4C, Case::Lower), ['4', 'c']);
+        assert_eq!(get_hex_chars_for_byte(0x7F, Case::Upper), ['7', 'F']);
+    }
+}

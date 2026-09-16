@@ -5938,9 +5938,9 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ts_capabilityversion",
- "ts_hexdump",
  "ts_keys",
  "ts_noise",
+ "ts_util",
  "zerocopy",
 ]
 
@@ -5999,12 +5999,12 @@ dependencies = [
  "tracing",
  "ts_cli_util",
  "ts_control_serde",
- "ts_hexdump",
  "ts_http_util",
  "ts_keys",
  "ts_packet",
  "ts_tls_util",
  "ts_transport",
+ "ts_util",
  "url",
  "yoke",
  "zerocopy",
@@ -6038,8 +6038,8 @@ dependencies = [
  "num-traits",
  "rand 0.10.2",
  "thiserror 2.0.18",
- "ts_hexdump",
  "ts_keys",
+ "ts_util",
  "zerocopy",
 ]
 
@@ -6074,13 +6074,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ts_keys",
-]
-
-[[package]]
-name = "ts_hexdump"
-version = "0.6.1"
-dependencies = [
- "heapless",
 ]
 
 [[package]]
@@ -6180,7 +6173,6 @@ dependencies = [
  "tracing",
  "tracing-test",
  "ts_cli_util",
- "ts_hexdump",
  "ts_util",
  "windows 0.62.2",
  "zerocopy",
@@ -6275,7 +6267,7 @@ dependencies = [
  "bytes",
  "crypto_box",
  "stable_deref_trait",
- "ts_hexdump",
+ "ts_util",
  "yoke",
 ]
 
@@ -6362,7 +6354,6 @@ dependencies = [
  "ts_dataplane",
  "ts_derp",
  "ts_disco_protocol",
- "ts_hexdump",
  "ts_keys",
  "ts_netcheck",
  "ts_netmon",
@@ -6373,6 +6364,7 @@ dependencies = [
  "ts_packetfilter_state",
  "ts_transport",
  "ts_tunnel",
+ "ts_util",
  "url",
  "yoke",
  "zerocopy",
@@ -6407,9 +6399,9 @@ dependencies = [
  "dyn-eq",
  "dyn-hash",
  "smallbox",
- "ts_hexdump",
  "ts_keys",
  "ts_packet",
+ "ts_util",
  "zerocopy",
 ]
 
@@ -6451,6 +6443,7 @@ version = "0.6.1"
 dependencies = [
  "futures-core",
  "futures-util",
+ "heapless",
  "pin-project-lite",
  "tokio",
  "tokio-stream",

@@ -49,7 +49,7 @@ impl Debug for &Ping {
 
         dbg.field("node_key", &self.node_key).field(
             "tx_id",
-            &format_args!("{:02x}", ts_hexdump::IterFmt::contiguous(&self.tx_id)),
+            &format_args!("{:02x}", ts_util::fmt::IterFmt::contiguous(&self.tx_id)),
         );
 
         if self.padding.iter().any(|&x| x != 0) {

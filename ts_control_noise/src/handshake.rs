@@ -2,9 +2,9 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::codec::Framed;
-use ts_hexdump::{AsHexExt, Case};
 use ts_keys::{MachineKeyPair, MachinePublicKey};
 use ts_noise::ik::SentHandshake;
+use ts_util::fmt::{AsHexExt, HexCase};
 use zerocopy::{IntoBytes, TryFromBytes};
 
 use crate::{
@@ -70,7 +70,7 @@ impl Handshake {
             "response body from control:\n{}",
             packet
                 .iter()
-                .hexdump(Case::Lower)
+                .hexdump(HexCase::Lower)
                 .flatten()
                 .collect::<String>()
         );

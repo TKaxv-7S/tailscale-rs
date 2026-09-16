@@ -13,9 +13,9 @@ rust-version.workspace = true
 [dependencies]
 # Our crates.
 ts_capabilityversion.workspace = true
-ts_hexdump.workspace = true
 ts_keys.workspace = true
 ts_noise.workspace = true
+ts_util.workspace = true
 
 # Unconditionally required dependencies.
 base64.workspace = true

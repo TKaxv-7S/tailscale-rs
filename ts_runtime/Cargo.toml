@@ -28,7 +28,7 @@ ts_packetfilter_state.workspace = true
 ts_transport.workspace = true
 ts_derp.workspace = true
 ts_tunnel.workspace = true
-ts_hexdump.workspace = true
+ts_util.workspace = true
 
 # Unconditionally required dependencies.
 futures.workspace = true

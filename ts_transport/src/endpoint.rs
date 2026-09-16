@@ -19,6 +19,7 @@ use core::{
 
 use dyn_eq::DynEq;
 use dyn_hash::DynHash;
+use ts_util::fmt::IterFmt;
 use zerocopy::IntoBytes;
 
 mod private {
@@ -221,11 +222,7 @@ pub struct DerpEndpoint(pub ts_keys::NodePublicKey);
 
 impl Debug for DerpEndpoint {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "derp:{:02x}",
-            ts_hexdump::IterFmt::contiguous(self.0.as_bytes())
-        )
+        write!(f, "derp:{:02x}", IterFmt::contiguous(self.0.as_bytes()))
     }
 }
 

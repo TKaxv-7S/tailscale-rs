@@ -12,7 +12,7 @@ use core::{
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut, buf::UninitSlice};
-use ts_hexdump::{AsHexExt, Case, hex_fmt};
+use ts_util::fmt::{AsHexExt, HexCase, hex_fmt};
 
 /// An immutable, contiguous sequence of bytes, specialized for networking applications.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -146,7 +146,10 @@ impl LowerHex for Packet {
         write!(
             f,
             "{}",
-            self.iter().hex(Case::Lower).flatten().collect::<String>()
+            self.iter()
+                .hex(HexCase::Lower)
+                .flatten()
+                .collect::<String>()
         )
     }
 }
@@ -156,7 +159,10 @@ impl UpperHex for Packet {
         write!(
             f,
             "{}",
-            self.iter().hex(Case::Upper).flatten().collect::<String>()
+            self.iter()
+                .hex(HexCase::Upper)
+                .flatten()
+                .collect::<String>()
         )
     }
 }
@@ -688,13 +694,13 @@ where
 
 impl LowerHex for PacketMut {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        hex_fmt(self.iter(), Case::Lower, f)
+        hex_fmt(self.iter(), HexCase::Lower, f)
     }
 }
 
 impl UpperHex for PacketMut {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        hex_fmt(self.iter(), Case::Upper, f)
+        hex_fmt(self.iter(), HexCase::Upper, f)
     }
 }
 
@@ -702,6 +708,8 @@ impl UpperHex for PacketMut {
 mod tests {
     use alloc::string::String;
     use core::fmt::Write;
+
+    use ts_util::fmt::{AsHexExt, HexCase};
 
     use super::*;
 
@@ -724,7 +732,7 @@ mod tests {
             buf,
             "{}",
             pkt.iter()
-                .hexdump(Case::Lower)
+                .hexdump(HexCase::Lower)
                 .flatten()
                 .collect::<String>()
         )
@@ -739,7 +747,7 @@ mod tests {
             buf,
             "{}",
             pkt.iter()
-                .hexdump(Case::Upper)
+                .hexdump(HexCase::Upper)
                 .flatten()
                 .collect::<String>()
         )

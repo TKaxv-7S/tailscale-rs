@@ -14,7 +14,7 @@ use core::fmt::{
 /// Intended usage is along the lines of contiguously hex-formatting a `[u8]` slice:
 ///
 /// ```rust
-/// # use ts_hexdump::IterFmt;
+/// # use ts_util::fmt::IterFmt;
 /// let ary = [0x1u8, 0x2, 0x3, 0x4, 0xa, 0xb];
 ///
 /// // Use the width specifier to indicate your desired element width:

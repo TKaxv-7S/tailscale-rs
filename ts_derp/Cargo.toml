@@ -12,12 +12,12 @@ rust-version.workspace = true
 
 [dependencies]
 # Our crates.
-ts_hexdump.workspace = true
 ts_http_util.workspace = true
 ts_keys.workspace = true
 ts_packet.workspace = true
 ts_tls_util.workspace = true
 ts_transport.workspace = true
+ts_util = { workspace = true, features = ["alloc"] }
 
 # Unconditionally required dependencies.
 bytes.workspace = true

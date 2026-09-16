@@ -13,10 +13,10 @@ rust-version.workspace = true
 [dependencies]
 bytes.workspace = true
 crypto_box.workspace = true
-ts_hexdump.workspace = true
-
 stable_deref_trait = "1.2"
 yoke.workspace = true
+
+ts_util.workspace = true
 
 [lints]
 workspace = true
