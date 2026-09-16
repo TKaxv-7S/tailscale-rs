@@ -133,6 +133,9 @@ audit-as-crates-io = false
 [policy.ts_underlay_router]
 audit-as-crates-io = false
 
+[policy.ts_util]
+audit-as-crates-io = false
+
 [[exemptions.aead]]
 version = "0.5.2"
 criteria = "safe-to-deploy"

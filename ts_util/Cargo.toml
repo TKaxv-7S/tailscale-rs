@@ -1,5 +1,5 @@
 [package]
-name = "ts_future_util"
+name = "ts_util"
 version.workspace = true
 description = "tailscale futures utilities"
 categories = ["asynchronous"]

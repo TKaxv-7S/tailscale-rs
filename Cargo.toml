@@ -18,7 +18,6 @@ members = [
     "ts_dynbitset",
     "ts_elixir/native/ts_elixir",
     "ts_ffi",
-    "ts_future_util",
     "ts_hexdump",
     "ts_http_util",
     "ts_keys",
@@ -41,10 +40,11 @@ members = [
     "ts_runtime",
     "ts_test_util",
     "ts_time",
+    "ts_tunnel",
     "ts_tls_util",
     "ts_transport",
     "ts_underlay_router",
-    "ts_tunnel",
+    "ts_util",
 ]
 
 [workspace.package]
@@ -125,7 +125,6 @@ ts_dataplane = { path = "ts_dataplane", version = "0.6.1" }
 ts_derp = { path = "ts_derp", version = "0.6.1" }
 ts_disco_protocol = { path = "ts_disco_protocol", version = "0.6.1" }
 ts_dynbitset = { path = "ts_dynbitset", version = "0.6.1" }
-ts_future_util = { path = "ts_future_util", version = "0.6.1" }
 ts_hexdump = { path = "ts_hexdump", version = "0.6.1" }
 ts_keys = { path = "ts_keys", version = "0.6.1" }
 ts_kv_store = { path = "ts_kv_store", version = "0.6.1" }
@@ -145,6 +144,7 @@ ts_packetfilter_state = { path = "ts_packetfilter_state", version = "0.6.1" }
 ts_peercapability = { path = "ts_peercapability", version = "0.6.1" }
 ts_http_util = { path = "ts_http_util", version = "0.6.1" }
 ts_tls_util = { path = "ts_tls_util", version = "0.6.1" }
+ts_util = { path = "ts_util", version = "0.6.1" }
 ts_runtime = { path = "ts_runtime", version = "0.6.1" }
 ts_test_util = { path = "ts_test_util" }
 ts_time = { path = "ts_time", version = "0.6.1" }

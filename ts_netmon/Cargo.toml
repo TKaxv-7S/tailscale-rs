@@ -24,8 +24,8 @@ tokio.workspace = true
 tokio-stream.workspace = true
 tracing.workspace = true
 
-ts_future_util.workspace = true
 ts_hexdump.workspace = true
+ts_util.workspace = true
 
 [dev-dependencies]
 ts_cli_util.workspace = true

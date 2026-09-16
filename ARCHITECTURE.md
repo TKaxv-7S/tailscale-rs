@@ -122,6 +122,7 @@ Crates used throughout the codebase that provide generic algorithms, data struct
   - [`ts_cli_util`](ts_cli_util/src/lib.rs): helpers for writing command line tools and initializing logging, used in examples.
   - [`ts_test_util`](ts_test_util/src/lib.rs): common code used by our unit and integration tests, such as determining if the network is available.
   - [`ts_hexdump`](ts_hexdump/src/lib.rs): traits and functions to generate canonical hexdumps of buffers for debug logging.
+  - [`ts_util`](ts_util/src/lib.rs): general utils crate holding miscellanea which have no better spot to live.
 
 #### Protocols
   - [`ts_disco_protocol`](ts_disco_protocol/src/lib.rs): incomplete implementation of Tailscale's discovery protocol (disco).

@@ -6077,17 +6077,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ts_future_util"
-version = "0.6.1"
-dependencies = [
- "futures-core",
- "futures-util",
- "pin-project-lite",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
 name = "ts_hexdump"
 version = "0.6.1"
 dependencies = [
@@ -6191,8 +6180,8 @@ dependencies = [
  "tracing",
  "tracing-test",
  "ts_cli_util",
- "ts_future_util",
  "ts_hexdump",
+ "ts_util",
  "windows 0.62.2",
  "zerocopy",
 ]
@@ -6454,6 +6443,17 @@ version = "0.6.1"
 dependencies = [
  "ts_packet",
  "ts_transport",
+]
+
+[[package]]
+name = "ts_util"
+version = "0.6.1"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project-lite",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
