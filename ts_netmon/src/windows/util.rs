@@ -78,6 +78,9 @@ impl From<&IpHelper::IP_ADAPTER_ADDRESSES_LH> for crate::Interface {
             } else {
                 None
             },
+
+            metric_v4: value.Ipv4Metric as _,
+            metric_v6: value.Ipv6Metric as _,
         }
     }
 }

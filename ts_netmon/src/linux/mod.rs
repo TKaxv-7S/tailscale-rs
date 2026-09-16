@@ -187,6 +187,8 @@ fn load_interface(link: LinkMessage) -> Option<Interface> {
         name: name?,
         mtu,
         hardware_addr,
+        metric_v4: 0,
+        metric_v6: 0,
     })
 }
 

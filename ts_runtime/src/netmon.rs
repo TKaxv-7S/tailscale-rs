@@ -92,15 +92,27 @@ impl State {
     }
 
     /// Iterate the routes on all interfaces in the `up` state.
+    ///
+    /// Like [`routes`][State::routes], the final element of the tuple is the full per-route
+    /// metric including the interface metric (if present).
     #[expect(dead_code)]
-    pub fn up_routes(&self) -> impl Iterator<Item = (InterfaceId, ts_netmon::Route)> {
+    pub fn up_routes(&self) -> impl Iterator<Item = (InterfaceId, ts_netmon::Route, usize)> {
+        self.routes()
+            .filter(|(iid, ..)| self.interfaces.get(iid).is_some_and(|iface| iface.up))
+    }
+
+    /// Iterate all known routes.
+    ///
+    /// The final element of the tuple is the full per-route metric including the interface
+    /// metric (if there is one).
+    ///
+    /// Includes routes on down interfaces.
+    #[expect(dead_code)]
+    pub fn routes(&self) -> impl Iterator<Item = (InterfaceId, ts_netmon::Route, usize)> {
         self.routes
             .iter()
             .filter_map(|(id, routes)| {
                 let interface = self.interfaces.get(id)?;
-                if !interface.up {
-                    return None;
-                }
 
                 Some(routes.iter().map(|((dst, gws), &metric)| {
                     (
@@ -110,6 +122,12 @@ impl State {
                             metric,
                             dst: *dst,
                         },
+                        metric
+                            + if dst.addr().is_ipv4() {
+                                interface.metric_v4
+                            } else {
+                                interface.metric_v6
+                            },
                     )
                 }))
             })

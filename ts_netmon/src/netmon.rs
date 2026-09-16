@@ -1,5 +1,5 @@
 use core::{net::IpAddr, pin::Pin};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use futures_util::{Stream, StreamExt, stream};
 
@@ -137,8 +137,16 @@ impl dyn Netmon {
                             state_v6.remove_route(interface, route),
                         ],
                         Ok(Event::InterfaceUpsert(interface)) => [
-                            state_v4.update_interface_state(&interface.id, interface.up),
-                            state_v6.update_interface_state(&interface.id, interface.up),
+                            state_v4.update_interface_state(
+                                &interface.id,
+                                interface.up,
+                                interface.metric_v4,
+                            ),
+                            state_v6.update_interface_state(
+                                &interface.id,
+                                interface.up,
+                                interface.metric_v6,
+                            ),
                         ],
                         Ok(Event::InterfaceRemoved(i)) => {
                             if strong_delete_consistency {
@@ -169,8 +177,10 @@ impl dyn Netmon {
     }
 }
 
-/// The unique part of a default route: the interface and the set of gateways.
-type DefaultRouteUnique = (InterfaceId, smallvec::SmallVec<[IpAddr; 1]>);
+type RouteGateways = smallvec::SmallVec<[IpAddr; 1]>;
+type RouteId = usize;
+type RouteMetric = usize;
+type InterfaceMetric = usize;
 
 /// Tracker for [`Event::DefaultRouteInterface`].
 ///
@@ -178,20 +188,24 @@ type DefaultRouteUnique = (InterfaceId, smallvec::SmallVec<[IpAddr; 1]>);
 /// [`Netmon`], emitting updates as [`Event::DefaultRouteInterface`].
 #[derive(Debug)]
 struct DefaultRouteState {
-    /// Metrics per (interface, gateways) tuple.
+    /// `BTreeMap` sorted by metric key: iterating the map in increasing order yields routes
+    /// of increasing total metric: the first acceptable route is the default route. The key
+    /// holds the sum of the route metric and the interface metric for each route.
     ///
-    /// Stored in btrees for ordering: we always want the minimum available metric
-    /// (`BTreeMap`), and the inner `BTreeSet` is sorted to provide a stable answer if
-    /// multiple interfaces have a route with the same metric. We have to store the set of
-    /// gateways along with the interface, as technically the same interface could have
-    /// multiple default routes with different sets of gateways (on platforms that permit
-    /// this) and they would be distinguishable.
-    metrics: BTreeMap<usize, BTreeSet<DefaultRouteUnique>>,
+    /// It's possible that more than one default route has the same metric, which is why
+    /// the value is a set.
+    metrics: BTreeMap<RouteMetric, BTreeSet<(InterfaceId, RouteId)>>,
 
-    /// Set of interfaces that are in the up state.
+    /// Map of interfaces currently known.
     ///
-    /// Only these interfaces can be considered for being the default route interface.
-    interfaces_up: HashSet<InterfaceId>,
+    /// Interfaces in the down state with no known routes may be removed from this map; the
+    /// lack of a map entry can be treated equivalently to this empty state.
+    interfaces: HashMap<InterfaceId, InterfaceState>,
+
+    /// The next route id to be allocated.
+    ///
+    /// Each route gets a unique id; they're not shared across interfaces.
+    next_route_id: RouteId,
 
     /// The last [`InterfaceId`] we reported in an event. If routes change but this
     /// doesn't, we don't need to report a new event.
@@ -201,17 +215,39 @@ struct DefaultRouteState {
     family: Family,
 }
 
+#[derive(Debug, Clone, Default)]
+struct InterfaceState {
+    /// Whether this interface is in the up state.
+    ///
+    /// Only `up` interfaces can provide a default route.
+    up: bool,
+    /// The metric for this interface.
+    ///
+    /// It's added to each route metric when they're added to
+    /// [`DefaultRouteState::metrics`].
+    metric: InterfaceMetric,
+    /// Routes for this interface.
+    routes: HashMap<RouteGateways, (RouteId, RouteMetric)>,
+}
+
+impl InterfaceState {
+    fn is_removable(&self) -> bool {
+        !self.up && self.routes.is_empty()
+    }
+}
+
 impl DefaultRouteState {
     fn new(family: Family) -> Self {
         Self {
             metrics: Default::default(),
             last_id: None,
-            interfaces_up: Default::default(),
+            interfaces: Default::default(),
+            next_route_id: 0,
             family,
         }
     }
 
-    /// Add the specified route for the given interface.
+    /// Add or update the specified route for the given interface.
     fn add_route(&mut self, interface_id: &InterfaceId, route: &Route) -> Option<Event> {
         if route.family() != self.family || !route.is_default_route() {
             return None;
@@ -220,15 +256,45 @@ impl DefaultRouteState {
         let mut gws = route.gateway.clone();
         gws.sort();
 
-        let modified = self
-            .metrics
-            .entry(route.metric)
-            .or_default()
-            .insert((interface_id.clone(), gws));
+        let interface = self.interfaces.entry(interface_id.clone()).or_default();
 
-        if !modified {
-            return None;
+        let id = match interface.routes.get_mut(&gws) {
+            Some((id, metric)) => {
+                if *metric == route.metric {
+                    return None;
+                }
+
+                if interface.up {
+                    let old_metric = route.metric + interface.metric;
+
+                    if let Some(routes) = self.metrics.get_mut(&old_metric) {
+                        routes.remove(&(interface_id.clone(), *id));
+                        if routes.is_empty() {
+                            self.metrics.remove(&old_metric);
+                        }
+                    }
+                }
+
+                *metric = route.metric;
+                *id
+            }
+            None => {
+                let id = self.next_route_id;
+                self.next_route_id += 1;
+
+                id
+            }
+        };
+
+        if interface.up {
+            let full_metric = interface.metric + route.metric;
+            self.metrics
+                .entry(full_metric)
+                .or_default()
+                .insert((interface_id.clone(), id));
         }
+
+        interface.routes.insert(gws, (id, route.metric));
 
         self.update_best()
     }
@@ -239,31 +305,95 @@ impl DefaultRouteState {
             return None;
         }
 
-        let entry = self.metrics.get_mut(&route.metric)?;
         let mut gws = route.gateway.clone();
         gws.sort();
 
-        let modified = entry.remove(&(interface_id.clone(), gws));
-        if !modified {
+        let iface = self.interfaces.get_mut(interface_id)?;
+        let (id, route_metric) = iface.routes.remove(&gws)?;
+
+        let full_metric = iface.metric + route_metric;
+
+        if iface.is_removable() {
+            self.interfaces.remove(interface_id);
+        }
+
+        let entry = self.metrics.get_mut(&full_metric)?;
+        if !entry.remove(&(interface_id.clone(), id)) {
             return None;
         }
 
         if entry.is_empty() {
-            self.metrics.remove(&route.metric);
+            self.metrics.remove(&full_metric);
         }
 
         self.update_best()
     }
 
-    /// Set the interface to up or down.
-    fn update_interface_state(&mut self, interface_id: &InterfaceId, up: bool) -> Option<Event> {
+    /// Set the interface to up or down, and update its metric if setting to up.
+    fn update_interface_state(
+        &mut self,
+        interface_id: &InterfaceId,
+        up: bool,
+        metric: usize,
+    ) -> Option<Event> {
         if up {
-            self.interfaces_up.insert(interface_id.clone())
+            let interface = self.interfaces.entry(interface_id.clone()).or_default();
+
+            if interface.metric == metric && interface.up == up {
+                return None;
+            }
+
+            if interface.metric != metric {
+                Self::remove_metrics_for_interface(&mut self.metrics, interface_id, &*interface);
+            }
+
+            interface.metric = metric;
+            interface.up = up;
+
+            for &(route_id, route_metric) in interface.routes.values() {
+                let full_metric = metric + route_metric;
+
+                self.metrics
+                    .entry(full_metric)
+                    .or_default()
+                    .insert((interface_id.clone(), route_id));
+            }
         } else {
-            self.interfaces_up.remove(interface_id)
+            let interface = self.interfaces.get_mut(interface_id)?;
+            if !interface.up {
+                return None;
+            }
+
+            interface.up = false;
+            Self::remove_metrics_for_interface(&mut self.metrics, interface_id, interface);
         }
-        .then(|| self.update_best())
-        .flatten()
+
+        self.update_best()
+    }
+
+    /// Remove the `self.metrics` entries associated with an interface.
+    ///
+    /// Reports whether a change in `self.metrics` occurred as a result.
+    fn remove_metrics_for_interface(
+        metrics: &mut BTreeMap<RouteMetric, BTreeSet<(InterfaceId, RouteId)>>,
+        interface_id: &InterfaceId,
+        interface: &InterfaceState,
+    ) -> bool {
+        let mut modified = false;
+
+        for &(route_id, route_metric) in interface.routes.values() {
+            let old_full_metric = interface.metric + route_metric;
+
+            if let Some(ent) = metrics.get_mut(&old_full_metric) {
+                modified = modified || ent.remove(&(interface_id.clone(), route_id));
+
+                if ent.is_empty() {
+                    metrics.remove(&old_full_metric);
+                }
+            }
+        }
+
+        modified
     }
 
     /// Remove all routes for the given interface from the state.
@@ -271,22 +401,10 @@ impl DefaultRouteState {
     /// We don't handle any logic re: [`Netmon::strong_delete_consistency`], the caller is
     /// responsible for deciding whether to call this function.
     fn remove_interface(&mut self, interface_id: &InterfaceId) -> Option<Event> {
-        let mut metrics_modified = false;
-
-        self.metrics.retain(|_, e| {
-            e.retain(|(id, _)| {
-                let ret = id == interface_id;
-                metrics_modified = metrics_modified || ret;
-
-                ret
-            });
-
-            !e.is_empty()
-        });
-
-        self.interfaces_up.remove(interface_id);
-
-        if !metrics_modified {
+        if let Some(iface) = self.interfaces.remove(interface_id)
+            && iface.up
+            && !Self::remove_metrics_for_interface(&mut self.metrics, interface_id, &iface)
+        {
             return None;
         }
 
@@ -300,7 +418,13 @@ impl DefaultRouteState {
             .metrics
             .values()
             .flatten()
-            .find_map(|(id, _)| self.interfaces_up.contains(id).then(|| id.clone()));
+            .find_map(|(iid, _rtid)| {
+                self.interfaces
+                    .get(iid)
+                    .is_some_and(|x| x.up)
+                    .then_some(iid)
+            })
+            .cloned();
 
         if new_best_id == self.last_id {
             return None;
@@ -323,7 +447,7 @@ mod test {
         let mut state = DefaultRouteState::new(Family::Ipv4);
         let interface = InterfaceId::new(MONTYPE, 0);
 
-        let evt1 = state.update_interface_state(&interface, true);
+        let evt1 = state.update_interface_state(&interface, true, 0);
 
         let route1 = Route {
             metric: 0,

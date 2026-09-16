@@ -245,12 +245,12 @@ impl<'a> Message<'a> {
 
         let (MessageHeader::Interface(net_table::Interface {
             index,
-            data: net_table::InterfaceData { mtu, .. },
+            data: net_table::InterfaceData { mtu, metric, .. },
             ..
         })
         | MessageHeader::Interface2(net_table::Interface2 {
             index,
-            data: net_table::InterfaceData64 { mtu, .. },
+            data: net_table::InterfaceData64 { mtu, metric, .. },
             ..
         })) = &self.header
         else {
@@ -271,6 +271,8 @@ impl<'a> Message<'a> {
             },
             name: la.name.clone(),
             up: self.header.flags().contains(Flags::UP),
+            metric_v4: metric.get() as _,
+            metric_v6: metric.get() as _,
         })
     }
 

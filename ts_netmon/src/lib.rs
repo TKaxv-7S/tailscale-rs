@@ -60,6 +60,20 @@ pub struct Interface {
 
     /// The interface's hardware address (if set).
     pub hardware_addr: Option<smallvec::SmallVec<[u8; 6]>>,
+
+    /// The routing metric for IPv4 addresses on this interface.
+    ///
+    /// Only some platforms have this field on an interface basis; others should set it to
+    /// zero. The metric for a route is the sum of the interface metric and the route's
+    /// intrinsic metric.
+    pub metric_v4: usize,
+
+    /// The routing metric for IPv6 addresses on this interface.
+    ///
+    /// Only some platforms have this field on an interface basis; others should set it to
+    /// zero. The metric for a route is the sum of the interface metric and the route's
+    /// intrinsic metric.
+    pub metric_v6: usize,
 }
 
 /// The unique/identifying part of a [`Route`] (excludes the metric field).
@@ -77,6 +91,10 @@ pub struct Route {
     /// gateways for a given route.
     pub gateway: smallvec::SmallVec<[IpAddr; 1]>,
     /// The metric for this route. Lower is higher-preference.
+    ///
+    /// Not all platforms (notably BSD, including macOS) have a per-route metric and instead
+    /// use the interface metric instead. The metric for a route is the sum of its interface
+    /// metric and this intrinsic metric.
     pub metric: usize,
 }
 

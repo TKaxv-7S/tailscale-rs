@@ -106,19 +106,9 @@ fn handle_route_change(
 /// [`IpHelper::MibDeleteInstance`] is no longer in the table, so this will return
 /// [`std::io::ErrorKind::NotFound`].
 pub fn populate_route(row: &mut IpHelper::MIB_IPFORWARD_ROW2) -> std::io::Result<()> {
-    let mut if_row = IpHelper::MIB_IPINTERFACE_ROW {
-        InterfaceLuid: row.InterfaceLuid,
-        // SAFETY: all bitpatterns are valid for si_family
-        Family: unsafe { row.DestinationPrefix.Prefix.si_family },
-        ..Default::default()
-    };
-
     // SAFETY: this API is invoked correctly.
     tokio::task::block_in_place(|| unsafe {
         IpHelper::GetIpForwardEntry2(row).ok()?;
-        IpHelper::GetIpInterfaceEntry(&mut if_row as *mut _).ok()?;
-
-        row.Metric += if_row.Metric;
 
         Ok(())
     })
