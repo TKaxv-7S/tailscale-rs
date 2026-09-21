@@ -10,8 +10,5 @@ extern crate alloc;
 #[cfg(any(feature = "std", test))]
 extern crate std;
 
-mod debounce;
-
-#[cfg(feature = "tokio")]
-pub use debounce::TokioDebounce;
-pub use debounce::{Debounce, DebounceExt};
+#[cfg(feature = "futures")]
+pub mod futures;

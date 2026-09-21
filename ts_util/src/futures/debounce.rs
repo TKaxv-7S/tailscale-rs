@@ -328,7 +328,7 @@ pub trait DebounceExt: Stream + Sized {
     ///
     /// ```rust
     /// # use std::time::Duration;
-    /// # use ts_future_util::DebounceExt;
+    /// # use ts_util::futures::DebounceExt;
     /// # use futures_util::StreamExt;
     ///
     /// # fn my_timer(dur: Duration) -> futures_util::future::Ready<()> { futures_util::future::ready(()) }
