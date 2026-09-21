@@ -86,11 +86,6 @@ Crates that communicate with other Tailscale nodes on the tailnet. The data plan
   - [`ts_bart_packetfilter`](ts_bart_packetfilter/src/lib.rs): specialization of `ts_bart` used by `ts_packetfilter` for fast filtering decisions.
   - [`ts_packetfilter_state`](ts_packetfilter_state/src/lib.rs): converters and adapters between the control protocol wire types in `ts_packetfilter_serde` and the types used in `ts_packetfilter`.
 
-#### Routing
-
-  - [`ts_overlay_router`](ts_overlay_router/src/lib.rs): routing table implementation for overlay (tailnet) traffic; determines which peer to send outbound traffic to, and which overlay transport should receive inbound packets.
-  - [`ts_underlay_router`](ts_underlay_router/src/lib.rs): routing table implementation for underlay traffic; determines which underlay transport an outbound packet should be sent from, if any.
-
 #### Transports
 
   - [`ts_transport`](ts_transport/src/lib.rs): traits that define transports and how they move traffic in and out of the overlay/underlay network.

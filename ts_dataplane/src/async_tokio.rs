@@ -12,7 +12,7 @@ use ts_packet::PacketMut;
 use ts_transport::{DynEndpoint, OverlayTransportId, PeerId, UnderlayTransportId};
 use ts_tunnel::NodeKeyPair;
 
-use crate::{InboundResult, OutboundResult};
+use crate::{InboundResult, OutboundResult, underlay_router};
 
 // NOTE(npry): this used to have unique types for each queue, but the names got confusing due to
 // having to think about the cartesian product of PacketType x QueueDirection x Network
@@ -379,7 +379,7 @@ async fn write_to_overlay(slf: &CoreState, packets: HashMap<OverlayTransportId, 
     }
 }
 
-async fn write_to_underlay(slf: &CoreState, packets: ts_underlay_router::outbound::Result) {
+async fn write_to_underlay(slf: &CoreState, packets: underlay_router::outbound::Result) {
     for ((tid, endpoint), packets) in packets {
         tracing::trace!(underlay_id = ?tid, ?endpoint, n_packets = packets.len(), "underlay data packets");
 

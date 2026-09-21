@@ -9,16 +9,16 @@ use std::{
 };
 
 use ts_bart::RoutingTable;
-use ts_overlay_router as or;
 use ts_packet::PacketMut;
 use ts_packetfilter::{FilterExt, IpProto};
 use ts_time::{Handle, Scheduler, TimeRange};
 use ts_transport::PeerId;
 use ts_tunnel::{Endpoint, NodeKeyPair};
-use ts_underlay_router as ur;
 
 pub mod async_tokio;
+pub mod overlay_router;
 mod packet_ident;
+pub mod underlay_router;
 
 pub use packet_ident::{PacketIdent, PacketType};
 
@@ -40,14 +40,14 @@ pub struct DataPlane {
     pub wireguard: Endpoint,
 
     /// Outbound overlay router.
-    pub or_out: or::outbound::Router,
+    pub or_out: overlay_router::outbound::Router,
     /// Outbound underlay router.
-    pub ur_out: ur::outbound::Router,
+    pub ur_out: underlay_router::outbound::Router,
 
     /// Inbound source filter.
     pub src_filter_in: Arc<ts_bart::Table<PeerId>>,
     /// Inbound overlay router.
-    pub or_in: or::inbound::Router,
+    pub or_in: overlay_router::inbound::Router,
 
     /// The packet filter.
     pub packet_filter: Arc<dyn ts_packetfilter::Filter + Send + Sync>,
@@ -113,7 +113,7 @@ impl DataPlane {
     /// Processes packets originating from the local device.
     #[tracing::instrument(skip_all, fields(n_packets = packets.len()))]
     pub fn process_outbound(&mut self, packets: Vec<PacketMut>) -> OutboundResult {
-        let or::outbound::Result {
+        let overlay_router::outbound::Result {
             to_wireguard,
             loopback,
         } = self.or_out.route(packets);
@@ -297,7 +297,7 @@ impl DataPlane {
     ///
     /// Must be called at least as often as dictated by [`DataPlane::next_event`] for the
     /// data plane to function correctly. It is harmless to call it more frequently.
-    pub fn process_events(&mut self) -> ts_underlay_router::outbound::Result {
+    pub fn process_events(&mut self) -> underlay_router::outbound::Result {
         let mut to_peers = HashMap::new();
         let now = Instant::now();
         let mut should_gc = false;
@@ -374,18 +374,18 @@ impl DataPlane {
 /// The result of processing outbound packets.
 pub struct OutboundResult {
     /// Packets to be sent into underlay transports for transmission.
-    pub to_peers: ts_underlay_router::outbound::Result,
+    pub to_peers: underlay_router::outbound::Result,
 
     /// Packets to be looped back and delivered to overlay transports.
-    pub loopback: ts_overlay_router::inbound::Result,
+    pub loopback: overlay_router::inbound::Result,
 }
 
 /// The result of processing inbound packets.
 pub struct InboundResult {
     /// Decrypted packets to be delivered to overlay transports.
-    pub to_local: ts_overlay_router::inbound::Result,
+    pub to_local: overlay_router::inbound::Result,
     /// Encrypted packets to be sent to wireguard peers by the underlay.
-    pub to_peers: ts_underlay_router::outbound::Result,
+    pub to_peers: underlay_router::outbound::Result,
 
     /// Encrypted disco packets to be handled externally.
     pub disco: Vec<PacketMut>,

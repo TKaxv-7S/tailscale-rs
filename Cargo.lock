@@ -5969,17 +5969,16 @@ dependencies = [
  "bitrs",
  "bytes",
  "etherparse",
+ "itertools",
  "tokio",
  "tracing",
  "ts_bart",
  "ts_disco_protocol",
- "ts_overlay_router",
  "ts_packet",
  "ts_packetfilter",
  "ts_time",
  "ts_transport",
  "ts_tunnel",
- "ts_underlay_router",
 ]
 
 [[package]]
@@ -6250,17 +6249,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ts_overlay_router"
-version = "0.6.1"
-dependencies = [
- "itertools",
- "tracing",
- "ts_bart",
- "ts_packet",
- "ts_transport",
-]
-
-[[package]]
 name = "ts_packet"
 version = "0.6.1"
 dependencies = [
@@ -6358,7 +6346,6 @@ dependencies = [
  "ts_netcheck",
  "ts_netmon",
  "ts_netstack_smoltcp",
- "ts_overlay_router",
  "ts_packet",
  "ts_packetfilter",
  "ts_packetfilter_state",
@@ -6427,14 +6414,6 @@ dependencies = [
  "ts_packet",
  "ts_time",
  "zerocopy",
-]
-
-[[package]]
-name = "ts_underlay_router"
-version = "0.6.1"
-dependencies = [
- "ts_packet",
- "ts_transport",
 ]
 
 [[package]]

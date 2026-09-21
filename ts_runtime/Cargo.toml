@@ -21,7 +21,6 @@ ts_keys.workspace = true
 ts_netcheck.workspace = true
 ts_netmon.workspace = true
 ts_netstack_smoltcp = { workspace = true, features = ["tokio"] }
-ts_overlay_router.workspace = true
 ts_packet.workspace = true
 ts_packetfilter = { workspace = true, features = ["checking-filter"] }
 ts_packetfilter_state.workspace = true

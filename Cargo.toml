@@ -29,7 +29,6 @@ members = [
     "ts_netstack_smoltcp_socket",
     "ts_nodecapability",
     "ts_noise",
-    "ts_overlay_router",
     "ts_packet",
     "ts_packetfilter",
     "ts_packetfilter_serde",
@@ -42,7 +41,6 @@ members = [
     "ts_tunnel",
     "ts_tls_util",
     "ts_transport",
-    "ts_underlay_router",
     "ts_util",
 ]
 
@@ -134,7 +132,6 @@ ts_netstack_smoltcp_core = { path = "ts_netstack_smoltcp_core", version = "0.6.1
 ts_netstack_smoltcp_socket = { path = "ts_netstack_smoltcp_socket", version = "0.6.1" }
 ts_nodecapability = { path = "ts_nodecapability", version = "0.6.1" }
 ts_noise = { path = "ts_noise", version = "0.6.1" }
-ts_overlay_router = { path = "ts_overlay_router", version = "0.6.1" }
 ts_packet = { path = "ts_packet", version = "0.6.1" }
 ts_packetfilter = { path = "ts_packetfilter", version = "0.6.1" }
 ts_packetfilter_serde = { path = "ts_packetfilter_serde", version = "0.6.1" }
@@ -147,7 +144,6 @@ ts_runtime = { path = "ts_runtime", version = "0.6.1" }
 ts_test_util = { path = "ts_test_util" }
 ts_time = { path = "ts_time", version = "0.6.1" }
 ts_transport = { path = "ts_transport", version = "0.6.1" }
-ts_underlay_router = { path = "ts_underlay_router", version = "0.6.1" }
 ts_tunnel = { path = "ts_tunnel", version = "0.6.1" }
 
 [workspace.lints.rust]

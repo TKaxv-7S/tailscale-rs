@@ -87,9 +87,6 @@ audit-as-crates-io = false
 [policy.ts_noise]
 audit-as-crates-io = false
 
-[policy.ts_overlay_router]
-audit-as-crates-io = false
-
 [policy.ts_packet]
 audit-as-crates-io = false
 
@@ -121,9 +118,6 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.ts_tunnel]
-audit-as-crates-io = false
-
-[policy.ts_underlay_router]
 audit-as-crates-io = false
 
 [policy.ts_util]
