@@ -303,6 +303,40 @@ impl CapabilityVersion {
     /// 2026-02-17: client understands NodeAttrForceRegisterMagicDNSIPv4Only; MagicDNS IPv6
     /// registered w/ OS by default
     pub const V133: Self = Self(133);
+    /// 2026-03-09: client understands NodeAttrDisableAndroidBindToActiveNetwork.
+    pub const V134: Self = Self(134);
+    /// 2026-03-30: client understands NodeAttrCacheNetworkMaps.
+    pub const V135: Self = Self(135);
+    /// 2026-04-09: client understands NodeAttrDisableLinuxCGNATDropRule.
+    pub const V136: Self = Self(136);
+    /// 2026-04-15: client handles 429 responses to `/machine/register`.
+    pub const V137: Self = Self(137);
+    /// 2026-03-31: can handle C2N `/debug/tka`.
+    pub const V138: Self = Self(138);
+    /// 2026-05-22: client understands NodeAttrEmitRuntimeMetrics.
+    pub const V139: Self = Self(139);
+    /// 2026-05-27: client understands NodeAttrDisableUDPGRO, NodeAttrDisableUDPGSO,
+    /// NodeAttrDisableTUNUDPGRO, NodeAttrDisableTUNTCPGRO.
+    pub const V140: Self = Self(140);
+    /// 2026-05-28: client understands NodeAttrNeverGSOEqualTail.
+    pub const V141: Self = Self(141);
+    /// 2026-07-06: client understands c2n `/remoteapi/localapi/*` proxy.
+    pub const V142: Self = Self(142);
+    /// 2026-07-22: client correctly ignores conn25 node attributes when not enabled by
+    /// environment variable.
+    pub const V143: Self = Self(143);
+    /// 2026-07-31: client sends packet.TSMPDiscoKeyAdvertisement around WireGuard
+    /// handshakes.
+    pub const V144: Self = Self(144);
+    /// 2026-08-04: client understands NodeAttrScopeQuad100OnMacOS.
+    pub const V145: Self = Self(145);
+    /// 2026-09-02: client understands NodeAttrConnReject; can handle C2N `/debug/reject`s.
+    pub const V146: Self = Self(146);
+    /// 2026-09-09: client handles 429/503 responses with retry-after headers to `/machine/`
+    /// endpoints.
+    pub const V147: Self = Self(147);
+    /// 2026-09-15: client understands Node.StableTailnetID.
+    pub const V148: Self = Self(148);
 
     /// The current capability version of this Tailscale node.
     pub const CURRENT: Self = Self::V130;
