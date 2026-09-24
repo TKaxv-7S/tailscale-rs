@@ -8,7 +8,7 @@ use std::{
 use crate::{
     Error, Notifier, Owner, Result,
     pub_sub::{Notifications, Subscriptions, WatchedEvent},
-    schema::{self, IndexStorage, TableDesc},
+    schema::{self, IndexStorage, Notifiable, TableDesc},
     transactions::TxnId,
 };
 
@@ -63,7 +63,7 @@ impl<TableStorage: schema::GeneratedStorage> Storage<TableStorage> {
         self.committed
     }
 
-    pub(crate) fn insert_singleton<D: schema::Singleton<Storage = TableStorage>>(
+    pub(crate) fn insert_singleton<D: schema::SingletonDesc<Storage = TableStorage>>(
         &mut self,
         value: D::Value,
         txn_id: TxnId,
@@ -71,7 +71,7 @@ impl<TableStorage: schema::GeneratedStorage> Storage<TableStorage> {
         D::get_mut(&mut self.tables).set(Some(value), txn_id);
     }
 
-    pub(crate) fn remove_singleton<D: schema::Singleton<Storage = TableStorage>>(
+    pub(crate) fn remove_singleton<D: schema::SingletonDesc<Storage = TableStorage>>(
         &mut self,
         txn_id: TxnId,
     ) {
@@ -79,7 +79,7 @@ impl<TableStorage: schema::GeneratedStorage> Storage<TableStorage> {
     }
 
     /// Retrieve a singleton value from the store using the given type-key.
-    pub(crate) fn get_singleton_value<D: schema::Singleton<Storage = TableStorage>>(
+    pub(crate) fn get_singleton_value<D: schema::SingletonDesc<Storage = TableStorage>>(
         &self,
         txn_id: TxnId,
     ) -> Option<&D::Value> {
@@ -89,7 +89,7 @@ impl<TableStorage: schema::GeneratedStorage> Storage<TableStorage> {
     /// Pass a mutable reference to a singleton value to `f`.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the singleton.
-    pub(crate) fn with_mut_singleton<D: schema::Singleton<Storage = TableStorage>, T>(
+    pub(crate) fn with_mut_singleton<D: schema::SingletonDesc<Storage = TableStorage>, T>(
         &mut self,
         txn_id: TxnId,
         f: impl FnOnce(&mut D::Value) -> T,
@@ -120,7 +120,9 @@ impl<TableStorage: schema::GeneratedStorage> Storage<TableStorage> {
         Some(result)
     }
 
-    pub(crate) fn get_singleton_notification_value<D: schema::Singleton<Storage = TableStorage>>(
+    pub(crate) fn get_singleton_notification_value<
+        D: schema::SingletonDesc<Storage = TableStorage>,
+    >(
         &self,
         txn_id: TxnId,
     ) -> Option<D::NotificationValue> {
@@ -655,11 +657,14 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
     /// Precondition: `self.check_txn_consistency` returns `Ok`. (Otherwise, commit may not be atomic).
     ///
     /// Panics if `self.check_txn_consistency` would return an error.
-    pub fn commit_txn(
+    pub fn commit_primary_table(
         &mut self,
         txn_id: TxnId,
         collect_notifications: bool,
-    ) -> HashMap<D::Key, WatchedEvent<D::NotificationValue>> {
+    ) -> HashMap<D::Key, WatchedEvent<D::NotificationValue>>
+    where
+        D: Notifiable,
+    {
         let modified = self.modified.take().and_then(|mut m| {
             assert_eq!(m.txn_id, txn_id);
             // The modified set is only used for notifications, so don't pay for filtering the
@@ -763,6 +768,27 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
         self.cleared = self.data.is_empty();
 
         result
+    }
+
+    /// Commit implementation for a table which is an index.
+    ///
+    /// Indexes can't have their own indexes or generate notifications, so this is a simpler version of
+    /// `commit_primary_table`.
+    pub fn commit_index(&mut self, txn_id: TxnId) {
+        match std::mem::take(&mut self.delete_mask) {
+            DeleteMask::All(dm_id, data) if dm_id == txn_id => {
+                self.data = data;
+            }
+            DeleteMask::Some(dm_id, removed) if dm_id == txn_id => {
+                removed.iter().for_each(|k| {
+                    self.data.remove(k);
+                });
+            }
+            DeleteMask::None => {}
+            _ => unreachable!(),
+        }
+        self.modified = None;
+        self.cleared = self.data.is_empty();
     }
 
     /// Takes a set of keys which may have been mutated and removes any keys where the values are unchanged
@@ -872,29 +898,6 @@ impl<D: schema::TableDesc, I: IndexStorage<D::Key, D::Value>> Table<D, I> {
             return None;
         }
         get_from_table::<D, Q>(&self.delete_mask, &self.data, key, txn_id)
-    }
-
-    /// Get a mutable reference to a value.
-    ///
-    /// Unlike most methods, `get_mut` will not update indexes after mutation. It is the caller's
-    /// responsibility to call `rebuild_indexes_for_key` whether the value is mutated or not (because
-    /// this method does clear the index for the returned key/value).
-    pub(crate) fn get_mut<Q>(
-        &mut self,
-        key: &Q,
-        txn_id: TxnId,
-        max_committed_id: TxnId,
-    ) -> Option<&mut D::Value>
-    where
-        D::Key: Borrow<Q>,
-        Q: ?Sized + Hash + Eq + ToOwned<Owned = D::Key>,
-        D::Value: Clone + PartialEq,
-    {
-        let value = get_from_table_mut::<D, Q>(&mut self.delete_mask, &mut self.data, key, txn_id)?;
-        record_mut_ref(&mut self.modified, key, txn_id, max_committed_id);
-        self.indexes.on_remove(value, txn_id, max_committed_id);
-
-        Some(value)
     }
 
     pub(crate) fn with_mut<Q, T>(
@@ -1446,7 +1449,7 @@ mod txn_test {
 
     #[test]
     fn with_mut_singleton_on_a_removed_value_records_no_mutation() {
-        use crate::schema::Singleton;
+        use crate::schema::SingletonDesc;
 
         let mut storage =
             Storage::<TableStorage>::new(std::sync::Arc::downgrade(&NoOpNotifier::new()));
@@ -1475,7 +1478,7 @@ mod txn_test {
 
     #[test]
     fn with_mut_singleton_without_a_change_records_no_mutation() {
-        use crate::schema::Singleton;
+        use crate::schema::SingletonDesc;
 
         let mut storage =
             Storage::<TableStorage>::new(std::sync::Arc::downgrade(&NoOpNotifier::new()));
@@ -1500,7 +1503,7 @@ mod txn_test {
 
     #[test]
     fn with_mut_singleton_keeps_a_mutation_from_earlier_in_the_txn() {
-        use crate::schema::Singleton;
+        use crate::schema::SingletonDesc;
 
         let mut storage =
             Storage::<TableStorage>::new(std::sync::Arc::downgrade(&NoOpNotifier::new()));

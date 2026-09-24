@@ -4,8 +4,8 @@
 
 use std::{
     borrow::Borrow,
-    cell::UnsafeCell,
     hash::Hash,
+    marker::PhantomData,
     num::NonZeroU64,
     sync::{RwLockReadGuard, RwLockWriteGuard},
 };
@@ -49,7 +49,7 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
             guard: Some(guard),
             owner,
             id,
-            _not_send_or_sync: UnsafeCell::new(()),
+            _not_send_or_sync: PhantomData,
         }
     }
 
@@ -73,7 +73,7 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
             guard: Some(guard),
             owner,
             id,
-            _not_send_or_sync: UnsafeCell::new(()),
+            _not_send_or_sync: PhantomData,
         })
     }
 
@@ -84,7 +84,11 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
     pub fn begin_ro_transaction(&self, owner: Owner) -> RoTransaction<'_, TableStorage> {
         let guard = self.get_read_lock();
 
-        RoTransaction { guard, owner }
+        RoTransaction {
+            guard,
+            owner,
+            _not_send_or_sync: PhantomData,
+        }
     }
 
     /// Start a read-only transaction (i.e., only supports non-mutating access to the store, but
@@ -98,7 +102,11 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
         self.clear_lock_poison();
 
         if let Ok(guard) = self.storage.try_read() {
-            return Some(RoTransaction { guard, owner });
+            return Some(RoTransaction {
+                guard,
+                owner,
+                _not_send_or_sync: PhantomData,
+            });
         }
 
         // Garbage-collect the abandoned transaction before reading.
@@ -109,7 +117,11 @@ impl<TableStorage: schema::GeneratedStorage> KvStore<TableStorage> {
         guard.clear_transaction();
         let guard = RwLockWriteGuard::downgrade(guard);
 
-        Some(RoTransaction { guard, owner })
+        Some(RoTransaction {
+            guard,
+            owner,
+            _not_send_or_sync: PhantomData,
+        })
         // We only try once, rather than loop because if the user is calling `try_begin_...`, they
         // presumably don't want to wait and we'd only need to retry if someone else grabbed the
         // the lock before we could.
@@ -163,7 +175,7 @@ pub struct Transaction<'guard, TableStorage: schema::GeneratedStorage> {
     id: TxnId,
     // Enforce the transaction is not `Send` or `Sync` so that it isn't accidentally held over an
     // await point (at least with a parallel async runtime), etc.
-    _not_send_or_sync: UnsafeCell<()>,
+    _not_send_or_sync: PhantomData<*const ()>,
 }
 
 impl<'guard, TableStorage: schema::GeneratedStorage> Drop for Transaction<'guard, TableStorage> {
@@ -256,7 +268,7 @@ impl<'guard, TableStorage: schema::GeneratedStorage> Transaction<'guard, TableSt
     /// Get a single value from the store by cloning the value.
     ///
     /// Returns `None` if there is no value for the specified key.
-    pub fn get<D: schema::Singleton<Storage = TableStorage>>(&self) -> Option<D::Value>
+    pub fn get<D: schema::SingletonDesc<Storage = TableStorage>>(&self) -> Option<D::Value>
     where
         D::Value: Clone,
     {
@@ -266,7 +278,7 @@ impl<'guard, TableStorage: schema::GeneratedStorage> Transaction<'guard, TableSt
     /// Get immutable access to a value in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with<D: schema::Singleton<Storage = TableStorage>, T>(
+    pub fn with<D: schema::SingletonDesc<Storage = TableStorage>, T>(
         &self,
         f: impl FnOnce(&D::Value) -> T,
     ) -> Option<T> {
@@ -276,7 +288,7 @@ impl<'guard, TableStorage: schema::GeneratedStorage> Transaction<'guard, TableSt
     /// Get mutable access to a value in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with_mut<D: schema::Singleton<Storage = TableStorage>, T>(
+    pub fn with_mut<D: schema::SingletonDesc<Storage = TableStorage>, T>(
         &mut self,
         f: impl FnOnce(&mut D::Value) -> T,
     ) -> Option<T>
@@ -287,12 +299,12 @@ impl<'guard, TableStorage: schema::GeneratedStorage> Transaction<'guard, TableSt
     }
 
     /// Insert a single value into the store.
-    pub fn insert<D: schema::Singleton<Storage = TableStorage>>(&mut self, value: D::Value) {
+    pub fn insert<D: schema::SingletonDesc<Storage = TableStorage>>(&mut self, value: D::Value) {
         <&mut Self as SingletonOpsMut<_>>::insert::<D>(self, value, self.owner)
     }
 
     /// Remove a single value from the store.
-    pub fn remove<D: schema::Singleton<Storage = TableStorage>>(&mut self) {
+    pub fn remove<D: schema::SingletonDesc<Storage = TableStorage>>(&mut self) {
         <&mut Self as SingletonOpsMut<_>>::remove::<D>(self, self.owner)
     }
 }
@@ -440,6 +452,9 @@ impl<'guard, D: TableDesc> KvTableTransactional<'guard, '_, D> {
 pub struct RoTransaction<'guard, TableStorage: schema::GeneratedStorage> {
     pub(crate) guard: RwLockReadGuard<'guard, Storage<TableStorage>>,
     pub(crate) owner: Owner,
+    // Enforce the transaction is not `Send` or `Sync` so that it isn't accidentally held over an
+    // await point (at least with a parallel async runtime), etc.
+    _not_send_or_sync: PhantomData<*const ()>,
 }
 
 impl<'guard, 'txn, TableStorage: schema::GeneratedStorage> Ops<TableStorage>
@@ -520,7 +535,7 @@ impl<'guard, TableStorage: schema::GeneratedStorage> RoTransaction<'guard, Table
     /// Get a single value from the store by cloning the value.
     ///
     /// Returns `None` if there is no value for the specified key.
-    pub fn get<D: schema::Singleton<Storage = TableStorage>>(&self) -> Option<D::Value>
+    pub fn get<D: schema::SingletonDesc<Storage = TableStorage>>(&self) -> Option<D::Value>
     where
         D::Value: Clone,
     {
@@ -530,7 +545,7 @@ impl<'guard, TableStorage: schema::GeneratedStorage> RoTransaction<'guard, Table
     /// Get immutable access to a value in the store by reference.
     ///
     /// Returns `None` (and does not call `f`) if there is no value for the specified key.
-    pub fn with<D: schema::Singleton<Storage = TableStorage>, T>(
+    pub fn with<D: schema::SingletonDesc<Storage = TableStorage>, T>(
         &self,
         f: impl FnOnce(&D::Value) -> T,
     ) -> Option<T> {
